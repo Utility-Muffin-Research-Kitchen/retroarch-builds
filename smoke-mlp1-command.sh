@@ -46,15 +46,27 @@ patches_applied = manifest.get("patches_applied", [])
 expected_patch_sets = {
     "": [],
     "command-menu": ["mlp1/0001-command-menu-commands.patch"],
+    # Superseded by the controller-bindings set below; kept so an older build
+    # manifest still validates.
     "portrait-rotation,command-menu,jawaka-load-content": [
         "common/0002-portrait-panel-landscape-rotation.patch",
         "mlp1/0001-command-menu-commands.patch",
         "mlp1/0002-jawaka-load-content-command.patch",
     ],
-    "portrait-rotation,command-menu,jawaka-load-content,sysfs-rumble": [
+    # What Leaf actually ships: keep these two in step with
+    # MLP1_RETROARCH_PATCH_SET in Leaf's stage/mlp1.mk. Patches are applied in
+    # the order they appear in the set string, so these lists are ordered too.
+    "portrait-rotation,command-menu,jawaka-load-content,controller-bindings": [
         "common/0002-portrait-panel-landscape-rotation.patch",
         "mlp1/0001-command-menu-commands.patch",
         "mlp1/0002-jawaka-load-content-command.patch",
+        "mlp1/0003-controller-only-bindings-ui.patch",
+    ],
+    "portrait-rotation,command-menu,jawaka-load-content,controller-bindings,sysfs-rumble": [
+        "common/0002-portrait-panel-landscape-rotation.patch",
+        "mlp1/0001-command-menu-commands.patch",
+        "mlp1/0002-jawaka-load-content-command.patch",
+        "mlp1/0003-controller-only-bindings-ui.patch",
         "common/0003-sysfs-rumble-fallback.patch",
     ],
 }

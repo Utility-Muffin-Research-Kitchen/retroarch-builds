@@ -37,7 +37,7 @@ MLP1 vertical-slice build:
 MLP1 build with Jawaka's current patch set:
 
 ```sh
-MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content,sysfs-rumble ./build-mlp1.sh
+MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content,controller-bindings,sysfs-rumble ./build-mlp1.sh
 ./smoke-mlp1-command.sh
 ```
 
@@ -134,6 +134,6 @@ Supported `MLP1_PATCH_SET` entries:
   with `--enable-networking` and `--enable-command`. Spruce/common patches are
   not applied implicitly; use `MLP1_PATCH_SET` with explicit patch names.
 - Leaf's default MLP1 runtime build uses
-  `portrait-rotation,command-menu,jawaka-load-content,sysfs-rumble`.
+  `portrait-rotation,command-menu,jawaka-load-content,controller-bindings,sysfs-rumble`.
 - The build script reverses applied patches before exiting so
   `workdir/src/RetroArch` stays reusable for later clean or patched builds.
