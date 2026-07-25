@@ -1,12 +1,13 @@
 diff --git a/input/input_driver.c b/input/input_driver.c
-index beba85e1b2..f86a171826 100644
+index beba85e1b2..2c472de656 100644
 --- a/input/input_driver.c
 +++ b/input/input_driver.c
-@@ -21,6 +21,11 @@
+@@ -21,6 +21,12 @@
  #include "libretro.h"
  #include <queues/message_queue.h>
  #include <streams/interface_stream.h>
 +#ifdef __linux__
++#include <errno.h>
 +#include <fcntl.h>
 +#include <unistd.h>
 +#include <stdlib.h>
@@ -14,7 +15,7 @@ index beba85e1b2..f86a171826 100644
  #define _USE_MATH_DEFINES
  #include <math.h>
  #include <string/stdstring.h>
-@@ -467,6 +472,148 @@ static const input_device_driver_t *input_joypad_init_first(void *data)
+@@ -467,6 +473,179 @@ static const input_device_driver_t *input_joypad_init_first(void *data)
     return NULL;
  }
  
@@ -52,8 +53,28 @@ index beba85e1b2..f86a171826 100644
 +static long        sr_pwm_off           = 0;
 +static long        sr_pwm_min           = 0;
 +static long        sr_pwm_max           = 0;
-+static long        sr_pwm_last          = -1;
++static int         sr_pwm_fd            = -1;
 +static bool        sr_probed            = false;
++
++/* Parse one PWM duty from the environment. Strict on purpose: a malformed value
++   silently becoming 0 would be the worst possible default, because under this
++   channel's inverted polarity duty 0 is FULL ON - every "stop rumbling" would
++   drive the motor to maximum instead. Anything we cannot read exactly disables
++   PWM mode rather than guessing. */
++static bool sr_pwm_env(const char *name, long *out)
++{
++   const char *s = getenv(name);
++   char *end     = NULL;
++   long  v;
++   if (!s || !*s)
++      return false;
++   errno = 0;
++   v = strtol(s, &end, 10);
++   if (errno != 0 || end == s || *end != '\0' || v < 0)
++      return false;
++   *out = v;
++   return true;
++}
 +
 +static void sr_write(const char *path, const char *val)
 +{
@@ -72,18 +93,26 @@ index beba85e1b2..f86a171826 100644
 +
 +   if ((p = getenv("RUMBLE_PWM_PATH")) != NULL && *p)
 +   {
-+      const char *off = getenv("RUMBLE_PWM_OFF");
-+      const char *min = getenv("RUMBLE_PWM_MIN");
-+      const char *max = getenv("RUMBLE_PWM_MAX");
-+      if (off && *off && min && *min && max && *max)
++      if (   sr_pwm_env("RUMBLE_PWM_OFF", &sr_pwm_off)
++          && sr_pwm_env("RUMBLE_PWM_MIN", &sr_pwm_min)
++          && sr_pwm_env("RUMBLE_PWM_MAX", &sr_pwm_max))
 +      {
-+         sr_path     = p;
-+         sr_pwm_off  = strtol(off, NULL, 10);
-+         sr_pwm_min  = strtol(min, NULL, 10);
-+         sr_pwm_max  = strtol(max, NULL, 10);
-+         sr_mode     = SR_PWM;
-+         return;
++         /* Hold the node open for the life of the process. Cores re-assert
++            rumble every frame, and the previous design cached the last duty to
++            avoid that traffic - but the host writes this same node too (it
++            reclaims the motor when a game is paused or the screen blanks), so a
++            cached value went stale and swallowed the next write the core
++            genuinely needed. Keeping the fd makes an unconditional write cheap
++            enough that no cache is needed. */
++         sr_pwm_fd = open(p, O_WRONLY | O_CLOEXEC);
++         if (sr_pwm_fd >= 0)
++         {
++            sr_path = p;
++            sr_mode = SR_PWM;
++            return;
++         }
 +      }
++      sr_pwm_off = sr_pwm_min = sr_pwm_max = 0;
 +   }
 +
 +   if ((p = getenv("RUMBLE_SYSFS_PATH")) != NULL && *p)
@@ -141,16 +170,19 @@ index beba85e1b2..f86a171826 100644
 +      case SR_PWM:
 +      {
 +         char buf[24];
++         int  len;
 +         long duty = sr_pwm_off;
 +         if (mag > 0)
 +            duty = sr_pwm_min
-+                 + (long)(((long long)(sr_pwm_max - sr_pwm_min) * mag) / 65535);
-+         /* Cores re-assert rumble every frame; only touch sysfs on a change. */
-+         if (duty == sr_pwm_last)
-+            return true;
-+         sr_pwm_last = duty;
-+         snprintf(buf, sizeof(buf), "%ld", duty);
-+         sr_write(sr_path, buf);
++                 + (long)(((long long)sr_pwm_max - sr_pwm_min) * mag / 65535);
++         /* Written unconditionally: the host writes this node too, so any cache
++            of "what we last wrote" goes stale and drops a needed write. */
++         len = snprintf(buf, sizeof(buf), "%ld", duty);
++         if (len > 0 && sr_pwm_fd >= 0)
++         {
++            ssize_t unused __attribute__((unused)) =
++               pwrite(sr_pwm_fd, buf, (size_t)len, 0);
++         }
 +         return true;
 +      }
 +      default:
@@ -163,7 +195,7 @@ index beba85e1b2..f86a171826 100644
  bool input_driver_set_rumble(
           unsigned port, unsigned joy_idx,
           enum retro_rumble_effect effect, uint16_t strength)
-@@ -487,6 +634,32 @@ bool input_driver_set_rumble(
+@@ -487,6 +666,32 @@ bool input_driver_set_rumble(
     if (sec_joypad     && sec_joypad->set_rumble)
        rumble_state = sec_joypad->set_rumble(joy_idx, effect, strength);
  
