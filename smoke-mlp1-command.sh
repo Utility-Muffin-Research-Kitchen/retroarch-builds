@@ -46,6 +46,17 @@ patches_applied = manifest.get("patches_applied", [])
 expected_patch_sets = {
     "": [],
     "command-menu": ["mlp1/0001-command-menu-commands.patch"],
+    "portrait-rotation,command-menu,jawaka-load-content": [
+        "common/0002-portrait-panel-landscape-rotation.patch",
+        "mlp1/0001-command-menu-commands.patch",
+        "mlp1/0002-jawaka-load-content-command.patch",
+    ],
+    "portrait-rotation,command-menu,jawaka-load-content,sysfs-rumble": [
+        "common/0002-portrait-panel-landscape-rotation.patch",
+        "mlp1/0001-command-menu-commands.patch",
+        "mlp1/0002-jawaka-load-content-command.patch",
+        "common/0003-sysfs-rumble-fallback.patch",
+    ],
 }
 
 if patch_set not in expected_patch_sets:
@@ -70,6 +81,8 @@ if patch_set == "command-menu":
         "GET_DISK_COUNT, GET_DISK_SLOT, SET_DISK_SLOT, GET_PATH savestate, "
         "PAUSE, UNPAUSE, MENU_TOGGLE, RESET, QUIT over the RetroArch command interface"
     )
+elif patch_set:
+    print(f"manifest_ok: patch set applied as expected: {patch_set}")
 else:
     print("manifest_ok: clean upstream command build has no MLP1 patches")
     print("device_required: launch this binary on MLP1 and send GET_STATUS, PAUSE_TOGGLE, MENU_TOGGLE, QUIT over the RetroArch command interface")

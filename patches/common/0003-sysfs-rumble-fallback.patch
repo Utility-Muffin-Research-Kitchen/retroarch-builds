@@ -1,5 +1,5 @@
 diff --git a/input/input_driver.c b/input/input_driver.c
-index beba85e..3c952fc 100644
+index beba85e1b2..f86a171826 100644
 --- a/input/input_driver.c
 +++ b/input/input_driver.c
 @@ -21,6 +21,11 @@
@@ -14,7 +14,7 @@ index beba85e..3c952fc 100644
  #define _USE_MATH_DEFINES
  #include <math.h>
  #include <string/stdstring.h>
-@@ -467,6 +472,101 @@ static const input_device_driver_t *input_joypad_init_first(void *data)
+@@ -467,6 +472,148 @@ static const input_device_driver_t *input_joypad_init_first(void *data)
     return NULL;
  }
  
@@ -29,14 +29,30 @@ index beba85e..3c952fc 100644
 + *   RUMBLE_SYSFS_PATH  - GPIO on/off  (e.g. /sys/class/gpio/gpio20/value)
 + *   RUMBLE_MOTOR_SCALE + RUMBLE_MOTOR_LEVEL - proportional motor
 + *   RUMBLE_TIMED_PATH  - timed vibrator (e.g. /sys/.../vibrator/enable)
++ *   RUMBLE_PWM_PATH + RUMBLE_PWM_OFF/_MIN/_MAX - PWM duty (see below)
++ *
++ * PWM duty mode is for a motor on a PWM channel that the host system owns and
++ * has already exported, configured and left enabled resting at its off duty.
++ * RetroArch only ever writes duty_cycle, so it needs no knowledge of the
++ * channel's polarity, period, or the motor's stiction floor - the host passes
++ * ready-made duty endpoints:
++ *   RUMBLE_PWM_OFF  duty that means "off" (polarity-dependent: 0 or period)
++ *   RUMBLE_PWM_MIN  duty at the weakest magnitude that still moves the motor
++ *   RUMBLE_PWM_MAX  duty at full magnitude (already capped to the user's
++ *                   configured strength)
++ * Magnitude maps linearly onto [MIN,MAX]; MIN/MAX may run either direction.
 + */
 +#ifdef __linux__
-+enum sysfs_rumble_type { SR_NONE, SR_GPIO, SR_MOTOR, SR_TIMED };
++enum sysfs_rumble_type { SR_NONE, SR_GPIO, SR_MOTOR, SR_TIMED, SR_PWM };
 +
 +static enum sysfs_rumble_type sr_mode   = SR_NONE;
 +static const char *sr_path              = NULL;
 +static const char *sr_motor_scale       = NULL;
 +static const char *sr_motor_level       = NULL;
++static long        sr_pwm_off           = 0;
++static long        sr_pwm_min           = 0;
++static long        sr_pwm_max           = 0;
++static long        sr_pwm_last          = -1;
 +static bool        sr_probed            = false;
 +
 +static void sr_write(const char *path, const char *val)
@@ -53,6 +69,22 @@ index beba85e..3c952fc 100644
 +{
 +   const char *p;
 +   sr_probed = true;
++
++   if ((p = getenv("RUMBLE_PWM_PATH")) != NULL && *p)
++   {
++      const char *off = getenv("RUMBLE_PWM_OFF");
++      const char *min = getenv("RUMBLE_PWM_MIN");
++      const char *max = getenv("RUMBLE_PWM_MAX");
++      if (off && *off && min && *min && max && *max)
++      {
++         sr_path     = p;
++         sr_pwm_off  = strtol(off, NULL, 10);
++         sr_pwm_min  = strtol(min, NULL, 10);
++         sr_pwm_max  = strtol(max, NULL, 10);
++         sr_mode     = SR_PWM;
++         return;
++      }
++   }
 +
 +   if ((p = getenv("RUMBLE_SYSFS_PATH")) != NULL && *p)
 +   {
@@ -106,6 +138,21 @@ index beba85e..3c952fc 100644
 +      case SR_TIMED:
 +         sr_write(sr_path, mag > 0 ? "150" : "0");
 +         return true;
++      case SR_PWM:
++      {
++         char buf[24];
++         long duty = sr_pwm_off;
++         if (mag > 0)
++            duty = sr_pwm_min
++                 + (long)(((long long)(sr_pwm_max - sr_pwm_min) * mag) / 65535);
++         /* Cores re-assert rumble every frame; only touch sysfs on a change. */
++         if (duty == sr_pwm_last)
++            return true;
++         sr_pwm_last = duty;
++         snprintf(buf, sizeof(buf), "%ld", duty);
++         sr_write(sr_path, buf);
++         return true;
++      }
 +      default:
 +         break;
 +   }
@@ -116,7 +163,7 @@ index beba85e..3c952fc 100644
  bool input_driver_set_rumble(
           unsigned port, unsigned joy_idx,
           enum retro_rumble_effect effect, uint16_t strength)
-@@ -487,6 +587,30 @@ bool input_driver_set_rumble(
+@@ -487,6 +634,32 @@ bool input_driver_set_rumble(
     if (sec_joypad     && sec_joypad->set_rumble)
        rumble_state = sec_joypad->set_rumble(joy_idx, effect, strength);
  
@@ -137,6 +184,8 @@ index beba85e..3c952fc 100644
 +               break;
 +            case RETRO_RUMBLE_WEAK:
 +               fb_weak = strength;
++               break;
++            default:
 +               break;
 +         }
 +         rumble_state = sr_set(fb_strong, fb_weak);

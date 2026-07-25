@@ -37,7 +37,7 @@ MLP1 vertical-slice build:
 MLP1 build with Jawaka's current patch set:
 
 ```sh
-MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content ./build-mlp1.sh
+MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content,sysfs-rumble ./build-mlp1.sh
 ./smoke-mlp1-command.sh
 ```
 
@@ -118,6 +118,7 @@ Supported `MLP1_PATCH_SET` entries:
 | `portrait-rotation` | rotate RetroArch's logical landscape output for the MLP1 portrait panel |
 | `command-menu` | add focused UDP command-menu commands for Jawaka |
 | `jawaka-load-content` | add Jawaka's load-content command path for resident/same-core switching |
+| `sysfs-rumble` | route core rumble to a sysfs motor when the joypad driver has no force feedback (Leaf drives the MLP1 PWM this way) |
 
 ## Notes
 
@@ -133,6 +134,6 @@ Supported `MLP1_PATCH_SET` entries:
   with `--enable-networking` and `--enable-command`. Spruce/common patches are
   not applied implicitly; use `MLP1_PATCH_SET` with explicit patch names.
 - Leaf's default MLP1 runtime build uses
-  `portrait-rotation,command-menu,jawaka-load-content`.
+  `portrait-rotation,command-menu,jawaka-load-content,sysfs-rumble`.
 - The build script reverses applied patches before exiting so
   `workdir/src/RetroArch` stays reusable for later clean or patched builds.
