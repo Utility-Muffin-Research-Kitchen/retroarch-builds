@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "source": "https://github.com/libretro/glsl-shaders.git",
+  "commit": "2b2c5ee3fd8e1a3884e20ed424fd9bfbc51cbb3d",
+  "tree": "75d2a0d9e072b912f3479587bb1b4bcd1b55d510",
+  "commit_epoch": 1780511317,
+  "selection": "shader-sources/mlp1-glsl-selection.json"
+}
