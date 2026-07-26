@@ -118,6 +118,7 @@ Supported `MLP1_PATCH_SET` entries:
 | `portrait-rotation` | rotate RetroArch's logical landscape output for the MLP1 portrait panel |
 | `command-menu` | add focused UDP command-menu commands for Jawaka |
 | `jawaka-load-content` | add Jawaka's load-content command path for resident/same-core switching |
+| `controller-bindings` | controller-only bindings UI for a device with no keyboard |
 | `sysfs-rumble` | route core rumble to a sysfs motor when the joypad driver has no force feedback (Leaf drives the MLP1 PWM this way) |
 
 ## Notes
