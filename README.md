@@ -107,13 +107,21 @@ core/display combination is compatible):
 ADB_SERIAL=<serial> make qualify-shader-recommendations-mlp1
 ```
 
-The bundle is generated under `output/mlp1/shaders/` from a pinned
-`libretro/glsl-shaders` commit. Its manifest records every file hash, dependency,
-license evidence, and qualification state. All standard presets are qualified
-as at least `loads` on MLP1 hardware. Four visually reviewed, performance-tested
-thin presets are generated under `leaf-recommended/`; they reference the
-standard tree without duplicating shader sources. No shader is enabled by
-default.
+Run the separate 14-case real-game gate for PT SkyWalker541, Sharp Shimmerless,
+and the lightweight CRT finalist:
+
+```sh
+ADB_SERIAL=<serial> make qualify-shader-expansion-mlp1
+```
+
+The bundle is generated under `output/mlp1/shaders/` from exact, pinned commits
+of the original upstream repositories. Its manifest records every file hash,
+dependency, upstream source path, license evidence, and qualification state.
+Nine visually reviewed, performance-tested thin presets are generated under
+`leaf-recommended/`; they reference the standard tree without duplicating
+shader sources. New advanced candidates stay outside that folder until they
+pass the complete MLP1 game-content visual and performance gates. No shader is
+enabled by default.
 
 The current recommendation gate excludes mGBA at 120 Hz with BFI because a
 no-shader control also fails that combination. GBA Color remains qualified at

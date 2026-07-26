@@ -83,7 +83,10 @@ def build_matrix(root: Path, expected_cases: int) -> tuple[dict[str, Any], bool]
         for report in reports
     }
     sources = {
-        json.dumps(report["shader_source"], sort_keys=True)
+        json.dumps(
+            report.get("shader_sources", [report["shader_source"]]),
+            sort_keys=True,
+        )
         for report in reports
     }
     if len(builds) > 1:
@@ -105,7 +108,12 @@ def build_matrix(root: Path, expected_cases: int) -> tuple[dict[str, Any], bool]
         "qualification": "pass" if not failures else "fail",
         "failures": failures,
         "retroarch_build": json.loads(next(iter(builds))) if len(builds) == 1 else None,
-        "shader_source": json.loads(next(iter(sources))) if len(sources) == 1 else None,
+        "shader_sources": (
+            json.loads(next(iter(sources))) if len(sources) == 1 else None
+        ),
+        "shader_source": (
+            json.loads(next(iter(sources)))[0] if len(sources) == 1 else None
+        ),
         "presets": presets,
     }
     return matrix, not failures

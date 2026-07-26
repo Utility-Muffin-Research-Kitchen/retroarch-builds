@@ -12,7 +12,7 @@ JAWAKA_SDCARD_ROOT ?= $(WORKSPACE_ROOT)/Jawaka/mock-sdcard
 SDCARD_PATH ?= $(JAWAKA_SDCARD_ROOT)
 APPS_PATH ?= $(SDCARD_PATH)/Apps
 
-.PHONY: package package-native package-platform package-mlp1 install-jawaka-app adb-stage-pak-mlp1 shaders-mlp1 validate-shaders-mlp1 test-shaders-mlp1 smoke-shaders-mlp1 performance-shader-mlp1 qualify-shader-recommendations-mlp1 clean
+.PHONY: package package-native package-platform package-mlp1 install-jawaka-app adb-stage-pak-mlp1 shaders-mlp1 validate-shaders-mlp1 test-shaders-mlp1 smoke-shaders-mlp1 performance-shader-mlp1 qualify-shader-recommendations-mlp1 qualify-shader-expansion-mlp1 clean
 
 shaders-mlp1:
 	$(PYTHON) "$(MLP1_SHADER_TOOL)" build --output "$(MLP1_SHADER_OUTPUT)"
@@ -31,6 +31,9 @@ performance-shader-mlp1:
 
 qualify-shader-recommendations-mlp1:
 	./qualify-mlp1-shader-recommendations.sh
+
+qualify-shader-expansion-mlp1:
+	./qualify-mlp1-shader-expansion.sh
 
 package package-native package-mlp1:
 	@rm -rf "$(PACKAGE_ROOT)"

@@ -20,7 +20,6 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOCK = REPO_ROOT / "shader-sources" / "mlp1-glsl.lock.json"
-DEFAULT_SOURCE = REPO_ROOT / "workdir" / "src" / "glsl-shaders"
 DEFAULT_OUTPUT = REPO_ROOT / "output" / "mlp1" / "shaders"
 DEPENDENCY_KEYS = {"lut", "overlay", "texture"}
 DOS_RESERVED = {
@@ -86,19 +85,171 @@ def run_git(source: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def locked_sources(lock: dict[str, Any]) -> list[dict[str, Any]]:
+    if lock.get("schema_version") == 1:
+        return [
+            {
+                "id": "libretro-glsl-shaders",
+                "source": lock.get("source"),
+                "commit": lock.get("commit"),
+                "tree": lock.get("tree"),
+                "commit_epoch": lock.get("commit_epoch"),
+                "checkout": "workdir/src/glsl-shaders",
+                "source_root": ".",
+                "output_root": "shaders_glsl",
+            }
+        ]
+    sources = lock.get("sources")
+    if lock.get("schema_version") != 2 or not isinstance(sources, list) or not sources:
+        raise BundleError(f"unsupported lock schema: {lock.get('schema_version')}")
+    return sources
+
+
+def source_manifest_rows(lock: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": str(source["id"]),
+            "url": str(source["source"]),
+            "commit": str(source["commit"]),
+            "tree": str(source["tree"]),
+            "commit_epoch": int(source["commit_epoch"]),
+        }
+        for source in locked_sources(lock)
+    ]
+
+
+def primary_source_manifest(lock: dict[str, Any]) -> dict[str, Any]:
+    return source_manifest_rows(lock)[0]
+
+
+def bundle_epoch(lock: dict[str, Any]) -> int:
+    return max(int(source["commit_epoch"]) for source in locked_sources(lock))
+
+
+def source_by_id(lock: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {str(source["id"]): source for source in locked_sources(lock)}
+
+
+def preset_source_id(preset: dict[str, Any], lock: dict[str, Any]) -> str:
+    sources = locked_sources(lock)
+    return str(preset.get("source", sources[0]["id"]))
+
+
+def preset_output_path(
+    preset: dict[str, Any],
+    lock: dict[str, Any],
+) -> PurePosixPath:
+    source = source_by_id(lock).get(preset_source_id(preset, lock))
+    if not source:
+        raise BundleError(
+            f"selected preset references unknown source "
+            f"{preset_source_id(preset, lock)!r}"
+        )
+    return normalize_source_path(
+        (
+            normalize_source_path(str(source["output_root"]))
+            / normalize_source_path(str(preset["path"]))
+        ).as_posix()
+    )
+
+
+def metadata_source_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = data.get("shader_sources")
+    if isinstance(rows, list):
+        return rows
+    row = data.get("shader_source")
+    return [row] if isinstance(row, dict) else []
+
+
+def validate_metadata_sources(
+    data: dict[str, Any],
+    lock: dict[str, Any],
+    source_ids: set[str],
+    label: str,
+) -> None:
+    expected = [
+        row
+        for row in source_manifest_rows(lock)
+        if str(row["id"]) in source_ids
+    ]
+    actual = metadata_source_rows(data)
+    normalized_actual = [
+        {
+            "id": str(row.get("id", expected[0]["id"] if len(expected) == 1 else "")),
+            "url": row.get("url"),
+            "commit": row.get("commit"),
+            "tree": row.get("tree"),
+            "commit_epoch": row.get("commit_epoch", expected[index]["commit_epoch"])
+            if index < len(expected)
+            else row.get("commit_epoch"),
+        }
+        for index, row in enumerate(actual)
+    ]
+    if normalized_actual != expected:
+        raise BundleError(f"{label} shader sources do not match the source lock")
+
+
 def validate_lock(lock: dict[str, Any], lock_path: Path) -> Path:
-    required = {"schema_version", "source", "commit", "tree", "commit_epoch", "selection"}
+    required = {"schema_version", "selection"}
     missing = sorted(required - set(lock))
     if missing:
         raise BundleError(f"{lock_path} is missing keys: {', '.join(missing)}")
-    if lock["schema_version"] != 1:
-        raise BundleError(f"unsupported lock schema: {lock['schema_version']}")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(lock["commit"])):
-        raise BundleError("lock commit must be a full lowercase SHA-1")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(lock["tree"])):
-        raise BundleError("lock tree must be a full lowercase SHA-1")
-    if not isinstance(lock["commit_epoch"], int) or lock["commit_epoch"] < 0:
-        raise BundleError("lock commit_epoch must be a non-negative integer")
+    seen_ids: set[str] = set()
+    seen_outputs: set[str] = set()
+    for index, source in enumerate(locked_sources(lock)):
+        source_required = {
+            "id",
+            "source",
+            "commit",
+            "tree",
+            "commit_epoch",
+            "source_root",
+            "output_root",
+        }
+        source_missing = sorted(source_required - set(source))
+        if source_missing:
+            raise BundleError(
+                f"lock source {index} is missing keys: {', '.join(source_missing)}"
+            )
+        source_id = str(source["id"])
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", source_id):
+            raise BundleError(f"invalid lock source id: {source_id!r}")
+        if source_id in seen_ids:
+            raise BundleError(f"duplicate lock source id: {source_id}")
+        seen_ids.add(source_id)
+        if not str(source["source"]).startswith(("https://", "git@")):
+            raise BundleError(f"invalid lock source URL for {source_id}")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(source["commit"])):
+            raise BundleError(f"{source_id} commit must be a full lowercase SHA-1")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(source["tree"])):
+            raise BundleError(f"{source_id} tree must be a full lowercase SHA-1")
+        if (
+            not isinstance(source["commit_epoch"], int)
+            or source["commit_epoch"] < 0
+        ):
+            raise BundleError(
+                f"{source_id} commit_epoch must be a non-negative integer"
+            )
+        if str(source["source_root"]) not in {"", "."}:
+            normalize_source_path(str(source["source_root"]))
+        output_root = normalize_source_path(str(source["output_root"])).as_posix()
+        if output_root.casefold() in seen_outputs:
+            raise BundleError(f"duplicate source output root: {output_root}")
+        seen_outputs.add(output_root.casefold())
+        checkout = source.get("checkout", f"workdir/src/{source_id}")
+        checkout_path = REPO_ROOT / str(checkout)
+        try:
+            checkout_path.resolve().relative_to(REPO_ROOT.resolve())
+        except ValueError as exc:
+            raise BundleError(
+                f"{source_id} checkout must remain inside retroarch-builds"
+            ) from exc
+        if source.get("license_path"):
+            normalize_source_path(str(source["license_path"]))
+            if not str(source.get("license_evidence_text", "")).strip():
+                raise BundleError(
+                    f"{source_id} repository license lacks evidence text"
+                )
     selection_path = REPO_ROOT / str(lock["selection"])
     try:
         selection_path.resolve().relative_to(REPO_ROOT.resolve())
@@ -107,7 +258,11 @@ def validate_lock(lock: dict[str, Any], lock_path: Path) -> Path:
     return selection_path
 
 
-def validate_selection(selection: dict[str, Any], selection_path: Path) -> None:
+def validate_selection(
+    selection: dict[str, Any],
+    selection_path: Path,
+    lock: dict[str, Any],
+) -> None:
     required = {
         "schema_version",
         "bundle_id",
@@ -145,6 +300,11 @@ def validate_selection(selection: dict[str, Any], selection_path: Path) -> None:
                 f"preset {index} is missing keys: {', '.join(sorted(missing_preset))}"
             )
         path = normalize_source_path(str(preset["path"]))
+        source_id = preset_source_id(preset, lock)
+        if source_id not in source_by_id(lock):
+            raise BundleError(
+                f"selected preset references unknown source {source_id!r}: {path}"
+            )
         if path.suffix.lower() != ".glslp":
             raise BundleError(f"selected preset is not .glslp: {path}")
         license_id = str(preset["license"]).strip()
@@ -167,9 +327,12 @@ def validate_selection(selection: dict[str, Any], selection_path: Path) -> None:
                 f"selected preset has an invalid qualification "
                 f"{preset['qualification']!r}: {path}"
             )
-        folded = path.as_posix().casefold()
+        folded = preset_output_path(preset, lock).as_posix().casefold()
         if folded in seen:
-            raise BundleError(f"duplicate selected preset path: {path}")
+            raise BundleError(
+                f"duplicate selected preset output path: "
+                f"{preset_output_path(preset, lock)}"
+            )
         seen.add(folded)
 
     qualification = aggregate_qualification(selection["presets"])
@@ -186,10 +349,9 @@ def validate_selection(selection: dict[str, Any], selection_path: Path) -> None:
             if isinstance(row, dict)
         }
         expected_presets = {
-            f"shaders_glsl/{normalize_source_path(str(row['path'])).as_posix()}": str(
-                row["qualification"]
-            )
+            preset_output_path(row, lock).as_posix(): str(row["qualification"])
             for row in selection["presets"]
+            if str(row["qualification"]) != "static-only"
         }
         if report_presets != expected_presets:
             raise BundleError(
@@ -243,21 +405,15 @@ def load_recommendations(
     data = load_json(path)
     if data.get("schema_version") != 1 or data.get("platform") != "mlp1":
         raise BundleError(f"invalid MLP1 recommendation metadata: {path}")
-    source = data.get("shader_source", {})
-    if (
-        source.get("url") != lock["source"]
-        or source.get("commit") != lock["commit"]
-        or source.get("tree") != lock["tree"]
-    ):
-        raise BundleError("recommendation shader source does not match the source lock")
     rows = data.get("presets")
     if not isinstance(rows, list) or not rows:
         raise BundleError("recommendation metadata must contain presets")
 
     selected = {
-        f"shaders_glsl/{normalize_source_path(str(row['path'])).as_posix()}": row
+        preset_output_path(row, lock).as_posix(): row
         for row in selection["presets"]
     }
+    referenced_source_ids: set[str] = set()
     seen: set[str] = set()
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -304,6 +460,7 @@ def load_recommendations(
             raise BundleError(
                 f"recommendation reference is not qualified recommended: {reference}"
             )
+        referenced_source_ids.add(preset_source_id(selected_row, lock))
         if row["qualification"] != "recommended":
             raise BundleError(f"recommendation is not qualified: {alias}")
         systems = row["intended_systems"]
@@ -330,10 +487,17 @@ def load_recommendations(
         visual = row["visual_review"]
         if not isinstance(visual, dict) or visual.get("status") != "pass":
             raise BundleError(f"recommendation lacks passed visual review: {alias}")
+    validate_metadata_sources(
+        data,
+        lock,
+        referenced_source_ids,
+        "recommendation",
+    )
     return path, data
 
 
 def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
+    cloned = False
     if not source.exists():
         if not fetch:
             raise BundleError(f"shader source checkout does not exist: {source}")
@@ -348,9 +512,10 @@ def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
         if result.returncode:
             detail = result.stderr.strip() or result.stdout.strip()
             raise BundleError(f"failed to clone shader source: {detail}")
+        cloned = True
     if not (source / ".git").exists():
         raise BundleError(f"shader source is not a Git checkout: {source}")
-    if run_git(source, "status", "--porcelain"):
+    if not cloned and run_git(source, "status", "--porcelain"):
         raise BundleError(f"shader source checkout has local changes: {source}")
 
     commit = str(lock["commit"])
@@ -365,12 +530,67 @@ def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
             raise BundleError(f"locked shader commit is absent locally: {commit}")
         run_git(source, "fetch", "--depth=1", "origin", commit)
     run_git(source, "checkout", "--detach", "--quiet", commit)
+    if run_git(source, "status", "--porcelain"):
+        raise BundleError(f"shader source checkout has local changes: {source}")
     if run_git(source, "rev-parse", "HEAD") != commit:
         raise BundleError("shader checkout did not resolve to the locked commit")
     if run_git(source, "rev-parse", "HEAD^{tree}") != str(lock["tree"]):
         raise BundleError("shader checkout tree does not match the lock")
     if int(run_git(source, "show", "-s", "--format=%ct", "HEAD")) != lock["commit_epoch"]:
         raise BundleError("shader checkout commit timestamp does not match the lock")
+
+
+def prepare_sources(
+    lock: dict[str, Any],
+    primary_override: Path | None,
+    fetch: bool,
+) -> dict[str, dict[str, Any]]:
+    prepared: dict[str, dict[str, Any]] = {}
+    for index, source_lock in enumerate(locked_sources(lock)):
+        source_id = str(source_lock["id"])
+        checkout = (
+            primary_override
+            if index == 0 and primary_override is not None
+            else REPO_ROOT
+            / str(source_lock.get("checkout", f"workdir/src/{source_id}"))
+        )
+        prepare_source(checkout, source_lock, fetch)
+        source_root_value = str(source_lock["source_root"])
+        source_root = (
+            checkout
+            if source_root_value in {"", "."}
+            else checkout / normalize_source_path(source_root_value).as_posix()
+        )
+        if not source_root.is_dir():
+            raise BundleError(
+                f"{source_id} source root does not exist at the locked commit: "
+                f"{source_root_value}"
+            )
+        license_path_value = source_lock.get("license_path")
+        if license_path_value:
+            license_path = checkout / normalize_source_path(
+                str(license_path_value)
+            ).as_posix()
+            if not license_path.is_file():
+                raise BundleError(
+                    f"{source_id} repository license is missing: {license_path_value}"
+                )
+            evidence = str(source_lock["license_evidence_text"])
+            if evidence.casefold() not in license_path.read_text(
+                encoding="utf-8"
+            ).casefold():
+                raise BundleError(
+                    f"{source_id} repository license evidence is stale"
+                )
+        prepared[source_id] = {
+            "lock": source_lock,
+            "checkout": checkout,
+            "root": source_root,
+            "output_root": normalize_source_path(
+                str(source_lock["output_root"])
+            ),
+        }
+    return prepared
 
 
 def normalize_source_path(value: str) -> PurePosixPath:
@@ -466,24 +686,32 @@ def validate_bundle_path(
 
 
 def collect_files(
-    source: Path,
+    sources: dict[str, dict[str, Any]],
     selection: dict[str, Any],
-) -> tuple[dict[PurePosixPath, dict[str, str]], list[dict[str, Any]]]:
+    lock: dict[str, Any],
+) -> tuple[dict[PurePosixPath, dict[str, Any]], list[dict[str, Any]]]:
     path_limit = int(selection["path_limit_bytes"])
     allowed_extensions = {
         str(extension).lower() for extension in selection["allowed_extensions"]
     }
-    files: dict[PurePosixPath, dict[str, str]] = {}
+    files: dict[PurePosixPath, dict[str, Any]] = {}
     preset_rows: list[dict[str, Any]] = []
 
     for preset in selection["presets"]:
+        source_id = preset_source_id(preset, lock)
+        source = sources[source_id]
+        source_root = source["root"]
+        checkout = source["checkout"]
+        source_lock = source["lock"]
         preset_path = normalize_source_path(str(preset["path"]))
+        preset_output = preset_output_path(preset, lock)
         preset_rows.append(
             {
-                "path": f"shaders_glsl/{preset_path.as_posix()}",
+                "path": preset_output.as_posix(),
                 "group": str(preset["group"]),
                 "qualification": str(preset["qualification"]),
                 "license": str(preset["license"]),
+                "source_id": source_id,
             }
         )
         pending = [preset_path]
@@ -493,9 +721,9 @@ def collect_files(
             if relative_path in visited:
                 continue
             visited.add(relative_path)
-            source_path = source / relative_path.as_posix()
+            source_path = source_root / relative_path.as_posix()
             try:
-                source_path.resolve().relative_to(source.resolve())
+                source_path.resolve().relative_to(source_root.resolve())
             except ValueError as exc:
                 raise BundleError(f"source path escapes checkout: {relative_path}") from exc
             if not source_path.is_file():
@@ -504,29 +732,64 @@ def collect_files(
                 raise BundleError(f"symlinks are not allowed in the bundle: {relative_path}")
             if source_path.stat().st_size == 0:
                 raise BundleError(f"empty shader dependency: {relative_path}")
-            output_relative = PurePosixPath("shaders_glsl") / relative_path
+            output_relative = source["output_root"] / relative_path
             validate_bundle_path(output_relative, path_limit, allowed_extensions)
 
             metadata = {
                 "license": str(preset["license"]),
                 "license_provenance": str(preset["license_provenance"]),
                 "license_evidence_path": str(preset["license_evidence_path"]),
+                "source_id": source_id,
+                "source_url": str(source_lock["source"]),
+                "source_commit": str(source_lock["commit"]),
+                "source_tree": str(source_lock["tree"]),
+                "source_path": source_path.relative_to(checkout).as_posix(),
             }
-            existing = files.get(relative_path)
-            if existing and existing != metadata:
+            record: dict[str, Any] = {
+                **metadata,
+                "copy_from": source_path,
+                "source_epoch": int(source_lock["commit_epoch"]),
+            }
+            existing = files.get(output_relative)
+            if existing and {
+                key: value
+                for key, value in existing.items()
+                if key not in {"copy_from", "source_epoch"}
+            } != metadata:
                 raise BundleError(
-                    f"conflicting license metadata for shared dependency: {relative_path}"
+                    f"conflicting provenance metadata for shared dependency: "
+                    f"{output_relative}"
                 )
-            files[relative_path] = metadata
+            files[output_relative] = record
             pending.extend(parse_dependencies(source_path, relative_path))
 
         evidence_path = normalize_source_path(str(preset["license_evidence_path"]))
-        if evidence_path not in visited:
+        evidence_scope = str(preset.get("license_evidence_scope", "dependency"))
+        if evidence_scope == "dependency":
+            if evidence_path not in visited:
+                raise BundleError(
+                    f"{preset_path}: license evidence is outside its dependency closure: "
+                    f"{evidence_path}"
+                )
+            evidence_file = source_root / evidence_path.as_posix()
+        elif evidence_scope == "repository":
+            evidence_file = checkout / evidence_path.as_posix()
+            try:
+                evidence_file.resolve().relative_to(checkout.resolve())
+            except ValueError as exc:
+                raise BundleError(
+                    f"{preset_path}: repository license evidence escapes checkout"
+                ) from exc
+        else:
             raise BundleError(
-                f"{preset_path}: license evidence is outside its dependency closure: "
-                f"{evidence_path}"
+                f"{preset_path}: unsupported license evidence scope "
+                f"{evidence_scope!r}"
             )
-        evidence_text = (source / evidence_path.as_posix()).read_text(encoding="utf-8")
+        if not evidence_file.is_file():
+            raise BundleError(
+                f"{preset_path}: license evidence file is missing: {evidence_path}"
+            )
+        evidence_text = evidence_file.read_text(encoding="utf-8")
         expected_notice = str(preset["license_evidence_text"])
         if expected_notice.casefold() not in evidence_text.casefold():
             raise BundleError(
@@ -534,8 +797,7 @@ def collect_files(
             )
 
     casefold_paths: dict[str, PurePosixPath] = {}
-    for relative_path in files:
-        output_relative = PurePosixPath("shaders_glsl") / relative_path
+    for output_relative in files:
         folded = output_relative.as_posix().casefold()
         existing = casefold_paths.get(folded)
         if existing and existing != output_relative:
@@ -546,22 +808,58 @@ def collect_files(
     return files, preset_rows
 
 
-def write_notice(destination: Path, lock: dict[str, Any], files: dict[PurePosixPath, Any]) -> None:
+def write_notice(
+    destination: Path,
+    lock: dict[str, Any],
+    sources: dict[str, dict[str, Any]],
+    files: dict[PurePosixPath, Any],
+) -> None:
     lines = [
         "# MLP1 RetroArch GLSL shader bundle notices",
         "",
-        "Source: libretro/glsl-shaders",
-        f"Source URL: {lock['source']}",
-        f"Source commit: {lock['commit']}",
+        "Leaf assembles this bundle directly from the original upstream repositories",
+        "listed below. It does not redistribute copies taken from another firmware.",
         "",
-        "The files selected for this initial bundle identify themselves in their",
-        "source headers as public domain. The original per-file notices are retained",
-        "inside each shader source file.",
-        "",
-        "Bundled source paths:",
+        "Original upstream sources:",
         "",
     ]
-    lines.extend(f"- `{path.as_posix()}`" for path in sorted(files, key=lambda item: item.as_posix()))
+    for source in locked_sources(lock):
+        lines.extend(
+            [
+                f"## {source['id']}",
+                "",
+                f"- URL: {source['source']}",
+                f"- Commit: `{source['commit']}`",
+                f"- Tree: `{source['tree']}`",
+                f"- License evidence: "
+                f"`{source.get('license_path', 'embedded per-file notices')}`",
+                "",
+            ]
+        )
+        license_path_value = source.get("license_path")
+        if license_path_value:
+            license_path = sources[str(source["id"])]["checkout"] / str(
+                license_path_value
+            )
+            lines.extend(
+                [
+                    "```text",
+                    license_path.read_text(encoding="utf-8").rstrip(),
+                    "```",
+                    "",
+                ]
+            )
+    lines.extend(
+        [
+            "Bundled files and their original source paths:",
+            "",
+        ]
+    )
+    lines.extend(
+        f"- `{path.as_posix()}` ← `{files[path]['source_id']}:"
+        f"{files[path]['source_path']}`"
+        for path in sorted(files, key=lambda item: item.as_posix())
+    )
     lines.append("")
     destination.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
@@ -640,8 +938,8 @@ def write_readme(
 ) -> None:
     if qualification == "static-only":
         qualification_note = (
-            "The presets are marked static-only until each one is qualified on "
-            "MLP1 hardware."
+            "Presets marked static-only are candidates and remain outside "
+            "leaf-recommended until they are qualified on MLP1 hardware."
         )
     elif qualification == "loads":
         qualification_note = (
@@ -708,7 +1006,6 @@ def build_manifest(
         }
         if source_metadata:
             row.update(source_metadata)
-            row["source_path"] = relative.removeprefix("shaders_glsl/")
         else:
             row["license"] = "LicenseRef-Leaf-Bundle-Metadata"
         file_rows.append(row)
@@ -716,15 +1013,15 @@ def build_manifest(
     extension_counts[".json"] += 1
     all_preset_rows = preset_rows + recommended_rows
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "bundle_id": selection["bundle_id"],
         "platform": selection["platform"],
         "source": {
-            "url": lock["source"],
-            "commit": lock["commit"],
-            "tree": lock["tree"],
-            "commit_epoch": lock["commit_epoch"],
+            key: value
+            for key, value in primary_source_manifest(lock).items()
+            if key != "id"
         },
+        "sources": source_manifest_rows(lock),
         "lock": {
             "path": lock_path.relative_to(REPO_ROOT).as_posix(),
             "sha256": sha256_json(lock_path),
@@ -734,7 +1031,7 @@ def build_manifest(
             "sha256": sha256_json(selection_path),
             "policy_version": selection["policy_version"],
         },
-        "generated_epoch": lock["commit_epoch"],
+        "generated_epoch": bundle_epoch(lock),
         "qualification": aggregate_qualification(all_preset_rows),
         "preset_count": len(all_preset_rows),
         "standard_preset_count": len(preset_rows),
@@ -752,15 +1049,16 @@ def build_manifest(
         }
     if selection.get("qualification_report"):
         report_path, report = load_qualification_report(selection)
-        report_source = report.get("shader_source", {})
-        if (
-            report_source.get("url") != lock["source"]
-            or report_source.get("commit") != lock["commit"]
-            or report_source.get("tree") != lock["tree"]
-        ):
-            raise BundleError(
-                "qualification report shader source does not match the source lock"
-            )
+        validate_metadata_sources(
+            report,
+            lock,
+            {
+                preset_source_id(row, lock)
+                for row in selection["presets"]
+                if str(row["qualification"]) != "static-only"
+            },
+            "qualification report",
+        )
         manifest["qualification_report"] = {
             "path": report_path.relative_to(REPO_ROOT).as_posix(),
             "sha256": sha256_json(report_path),
@@ -798,17 +1096,18 @@ def atomic_promote(staging: Path, output: Path) -> None:
 
 def build_bundle(
     lock_path: Path,
-    source: Path,
+    source: Path | None,
     output: Path,
     fetch: bool,
 ) -> dict[str, Any]:
     lock = load_json(lock_path)
     selection_path = validate_lock(lock, lock_path)
     selection = load_json(selection_path)
-    validate_selection(selection, selection_path)
+    validate_selection(selection, selection_path, lock)
     recommendations_path, recommendations = load_recommendations(selection, lock)
-    prepare_source(source, lock, fetch)
-    files, preset_rows = collect_files(source, selection)
+    sources = prepare_sources(lock, source, fetch)
+    files, preset_rows = collect_files(sources, selection, lock)
+    generated_epoch = bundle_epoch(lock)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -818,22 +1117,28 @@ def build_bundle(
         staging.mkdir()
         metadata_by_output_path: dict[str, dict[str, str]] = {}
         for relative_path in sorted(files, key=lambda item: item.as_posix()):
-            source_path = source / relative_path.as_posix()
-            destination = staging / "shaders_glsl" / relative_path.as_posix()
+            record = files[relative_path]
+            source_path = record["copy_from"]
+            destination = staging / relative_path.as_posix()
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source_path, destination)
             destination.chmod(0o644)
-            os.utime(destination, (lock["commit_epoch"], lock["commit_epoch"]))
-            metadata_by_output_path[
-                (PurePosixPath("shaders_glsl") / relative_path).as_posix()
-            ] = files[relative_path]
+            os.utime(
+                destination,
+                (record["source_epoch"], record["source_epoch"]),
+            )
+            metadata_by_output_path[relative_path.as_posix()] = {
+                key: value
+                for key, value in record.items()
+                if key not in {"copy_from", "source_epoch"}
+            }
 
         recommended_rows = (
-            write_recommendations(staging, recommendations, lock["commit_epoch"])
+            write_recommendations(staging, recommendations, generated_epoch)
             if recommendations
             else []
         )
-        write_notice(staging / "NOTICE.md", lock, files)
+        write_notice(staging / "NOTICE.md", lock, sources, files)
         write_readme(
             staging / "README.txt",
             aggregate_qualification(selection["presets"] + recommended_rows),
@@ -841,7 +1146,7 @@ def build_bundle(
         )
         for metadata_file in (staging / "NOTICE.md", staging / "README.txt"):
             metadata_file.chmod(0o644)
-            os.utime(metadata_file, (lock["commit_epoch"], lock["commit_epoch"]))
+            os.utime(metadata_file, (generated_epoch, generated_epoch))
 
         manifest = build_manifest(
             staging,
@@ -867,7 +1172,7 @@ def build_bundle(
             )
         manifest_path.write_bytes(manifest_payload)
         manifest_path.chmod(0o644)
-        os.utime(manifest_path, (lock["commit_epoch"], lock["commit_epoch"]))
+        os.utime(manifest_path, (generated_epoch, generated_epoch))
         validate_bundle(lock_path, staging)
         atomic_promote(staging, output)
     return manifest
@@ -896,7 +1201,7 @@ def validate_bundle(lock_path: Path, output: Path) -> dict[str, Any]:
     lock = load_json(lock_path)
     selection_path = validate_lock(lock, lock_path)
     selection = load_json(selection_path)
-    validate_selection(selection, selection_path)
+    validate_selection(selection, selection_path, lock)
     recommendations_path, recommendations = load_recommendations(selection, lock)
     recommended_rows = recommendations["presets"] if recommendations else []
     manifest_path = output / "manifest.json"
@@ -908,10 +1213,10 @@ def validate_bundle(lock_path: Path, output: Path) -> dict[str, Any]:
     manifest = load_json(manifest_path)
 
     expected_scalar = {
-        "schema_version": 1,
+        "schema_version": 2,
         "bundle_id": selection["bundle_id"],
         "platform": selection["platform"],
-        "generated_epoch": lock["commit_epoch"],
+        "generated_epoch": bundle_epoch(lock),
         "preset_count": len(selection["presets"]) + len(recommended_rows),
         "standard_preset_count": len(selection["presets"]),
         "recommended_preset_count": len(recommended_rows),
@@ -925,13 +1230,14 @@ def validate_bundle(lock_path: Path, output: Path) -> dict[str, Any]:
                 f"manifest {key} is {manifest.get(key)!r}, expected {expected!r}"
             )
     for key, expected in {
-        "url": lock["source"],
-        "commit": lock["commit"],
-        "tree": lock["tree"],
-        "commit_epoch": lock["commit_epoch"],
+        key: value
+        for key, value in primary_source_manifest(lock).items()
+        if key != "id"
     }.items():
         if manifest.get("source", {}).get(key) != expected:
             raise BundleError(f"manifest source.{key} does not match the lock")
+    if manifest.get("sources") != source_manifest_rows(lock):
+        raise BundleError("manifest sources do not match the lock")
     if manifest.get("lock", {}).get("sha256") != sha256_json(lock_path):
         raise BundleError("manifest lock hash is stale")
     if manifest.get("selection", {}).get("sha256") != sha256_json(selection_path):
@@ -949,15 +1255,16 @@ def validate_bundle(lock_path: Path, output: Path) -> dict[str, Any]:
         raise BundleError("manifest recommendation metadata is stale")
     if selection.get("qualification_report"):
         report_path, report = load_qualification_report(selection)
-        report_source = report.get("shader_source", {})
-        if (
-            report_source.get("url") != lock["source"]
-            or report_source.get("commit") != lock["commit"]
-            or report_source.get("tree") != lock["tree"]
-        ):
-            raise BundleError(
-                "qualification report shader source does not match the source lock"
-            )
+        validate_metadata_sources(
+            report,
+            lock,
+            {
+                preset_source_id(row, lock)
+                for row in selection["presets"]
+                if str(row["qualification"]) != "static-only"
+            },
+            "qualification report",
+        )
         if manifest.get("qualification_report") != {
             "path": report_path.relative_to(REPO_ROOT).as_posix(),
             "sha256": sha256_json(report_path),
@@ -1039,7 +1346,7 @@ def validate_bundle(lock_path: Path, output: Path) -> dict[str, Any]:
         raise BundleError("bundle exceeds its installed size policy")
 
     expected_standard_presets = {
-        f"shaders_glsl/{normalize_source_path(str(row['path'])).as_posix()}"
+        preset_output_path(row, lock).as_posix()
         for row in selection["presets"]
     }
     expected_recommended_presets = {
@@ -1052,9 +1359,7 @@ def validate_bundle(lock_path: Path, output: Path) -> dict[str, Any]:
     if manifest_presets != expected_presets:
         raise BundleError("manifest preset list does not match selection")
     expected_qualification = {
-        f"shaders_glsl/{normalize_source_path(str(row['path'])).as_posix()}": str(
-            row["qualification"]
-        )
+        preset_output_path(row, lock).as_posix(): str(row["qualification"])
         for row in selection["presets"]
     }
     expected_qualification.update(
@@ -1080,7 +1385,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     build = subparsers.add_parser("build", help="build and validate the shader bundle")
-    build.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
+    build.add_argument(
+        "--source",
+        type=Path,
+        default=None,
+        help="override the primary source checkout (legacy compatibility)",
+    )
     build.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     build.add_argument(
         "--no-fetch",
@@ -1099,7 +1409,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "build":
             manifest = build_bundle(
                 args.lock.resolve(),
-                args.source.resolve(),
+                args.source.resolve() if args.source else None,
                 args.output.resolve(),
                 not args.no_fetch,
             )

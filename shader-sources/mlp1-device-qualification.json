@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "qualification_id": "mlp1-2026-07-26",
-  "qualified_at": "2026-07-26",
+  "qualification_id": "mlp1-expansion-2026-07-27",
+  "qualified_at": "2026-07-27",
   "platform": "mlp1",
   "device": {
     "model": "Miniloong Pocket 1",
@@ -20,6 +20,29 @@
     "commit": "2b2c5ee3fd8e1a3884e20ed424fd9bfbc51cbb3d",
     "tree": "75d2a0d9e072b912f3479587bb1b4bcd1b55d510"
   },
+  "shader_sources": [
+    {
+      "id": "libretro-glsl-shaders",
+      "url": "https://github.com/libretro/glsl-shaders.git",
+      "commit": "2b2c5ee3fd8e1a3884e20ed424fd9bfbc51cbb3d",
+      "tree": "75d2a0d9e072b912f3479587bb1b4bcd1b55d510",
+      "commit_epoch": 1780511317
+    },
+    {
+      "id": "pt-skywalker541",
+      "url": "https://github.com/SkyWalker541/PT-SkyWalker541.git",
+      "commit": "0e6ac059afe2fd5823b68385b8865bda5f0640e2",
+      "tree": "2b9582952b923939839448fa451962b793617e53",
+      "commit_epoch": 1783175433
+    },
+    {
+      "id": "sharp-shimmerless",
+      "url": "https://github.com/Woohyun-Kang/Sharp-Shimmerless-Shader.git",
+      "commit": "2a74e7af599335c2ce5e493f823a757925c80db3",
+      "tree": "93bb1abe5b904dadb2259152a2356ba228de6c9e",
+      "commit_epoch": 1732469781
+    }
+  ],
   "runs": [
     {
       "content_class": "committed CC0 128x128 PICO-8 color-grid fixture",
@@ -46,6 +69,20 @@
       "passes_per_preset": 1,
       "preset_count": 11,
       "evidence_directory": "output/mlp1/shader-smoke/20260726-203219"
+    },
+    {
+      "content_class": "multi-source expansion on committed CC0 color/gray/checkerboard/grid visual fixture",
+      "core": "fake08",
+      "passes_per_preset": 2,
+      "preset_count": 15,
+      "evidence_directory": "output/mlp1/shader-smoke/20260727-001151"
+    },
+    {
+      "content_class": "final nine-recommendation bundle on committed CC0 color/gray/checkerboard/grid visual fixture",
+      "core": "fake08",
+      "passes_per_preset": 2,
+      "preset_count": 20,
+      "evidence_directory": "output/mlp1/shader-smoke/20260727-004957"
     }
   ],
   "mandatory_checks": {
@@ -61,6 +98,22 @@
     "fugazi_global_apply_preserve_clear": "pass"
   },
   "presets": [
+    {
+      "path": "shaders_glsl/community/pt-skywalker541/PT_SkyWalker541.glslp",
+      "qualification": "recommended"
+    },
+    {
+      "path": "shaders_glsl/community/sharp-shimmerless/sharp-shimmerless.glslp",
+      "qualification": "recommended"
+    },
+    {
+      "path": "shaders_glsl/crt/crt-hyllian-fast.glslp",
+      "qualification": "recommended"
+    },
+    {
+      "path": "shaders_glsl/crt/crt-lottes-fast.glslp",
+      "qualification": "loads"
+    },
     {
       "path": "shaders_glsl/handheld/gba-color.glslp",
       "qualification": "recommended"
@@ -93,6 +146,6 @@
   "recommended_performance": {
     "status": "complete",
     "metadata": "shader-sources/mlp1-recommended.json",
-    "note": "Four presets meet the 59 FPS gate across their applicable 60/120 Hz matrix. The mGBA 120Hz BFI path is explicitly excluded because the no-shader control also fails."
+    "note": "Nine presets meet the 59 FPS gate across their applicable 60/120 Hz matrix. mGBA at 120Hz with BFI is excluded because the no-shader control fails. CRT Lite is BFI-off only after its PS1 120Hz BFI case measured 50.282 FPS. CRT Lottes Fast remains advanced-only after measuring 34.017 FPS at 60Hz."
   }
 }

@@ -297,6 +297,41 @@ image_difference() {
         tail -1
 }
 
+wait_for_remote_png() {
+    local directory="$1"
+    local remote_path=""
+    local size=""
+    local previous_size=""
+    local stable_count=0
+    local _
+    for _ in $(seq 1 40); do
+        remote_path="$(
+            "${ADB[@]}" shell \
+                "find '$directory' -type f -name '*.png' | sort | tail -1" |
+                tr -d '\r'
+        )"
+        if [ -n "$remote_path" ]; then
+            size="$(
+                "${ADB[@]}" shell "stat -c %s '$remote_path' 2>/dev/null" |
+                    tr -d '\r'
+            )"
+            case "$size" in
+                *[!0-9]*|"") stable_count=0 ;;
+                0) stable_count=0 ;;
+                "$previous_size") stable_count=$((stable_count + 1)) ;;
+                *) stable_count=0 ;;
+            esac
+            if [ "$stable_count" -ge 2 ]; then
+                printf '%s\n' "$remote_path"
+                return 0
+            fi
+            previous_size="$size"
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
 capture_display() {
     local local_path="$1"
     local remote_path
@@ -305,16 +340,16 @@ cd '$REMOTE_DISPLAY_SCREENSHOTS' &&
 XDG_RUNTIME_DIR=/var/run WAYLAND_DISPLAY=wayland-0 \
     weston-screenshooter >/dev/null 2>&1
 "
-    remote_path="$(
-        "${ADB[@]}" shell \
-            "find '$REMOTE_DISPLAY_SCREENSHOTS' -type f -name '*.png' | sort | tail -1" |
-            tr -d '\r'
-    )"
+    remote_path="$(wait_for_remote_png "$REMOTE_DISPLAY_SCREENSHOTS")"
     [ -n "$remote_path" ] || {
         echo "Weston did not create a display screenshot" >&2
         return 1
     }
     "${ADB[@]}" pull "$remote_path" "$local_path" >/dev/null
+    [ -s "$local_path" ] || {
+        echo "Weston display screenshot is empty after transfer" >&2
+        return 1
+    }
     "${ADB[@]}" shell "rm -f '$remote_path'"
 }
 
@@ -374,10 +409,7 @@ for preset_relative in "${PRESETS[@]}"; do
 
         run_ctl raw-send SCREENSHOT >/dev/null
         sleep 1
-        remote_screenshot="$(
-            "${ADB[@]}" shell "find '$REMOTE_SCREENSHOTS' -type f -name '*.png' | sort | tail -1" |
-                tr -d '\r'
-        )"
+        remote_screenshot="$(wait_for_remote_png "$REMOTE_SCREENSHOTS")"
         [ -n "$remote_screenshot" ] || {
             echo "RetroArch did not create a screenshot for $preset_relative pass $pass" >&2
             exit 1
@@ -401,6 +433,10 @@ for preset_relative in "${PRESETS[@]}"; do
         local_screenshot="$RESULT_DIR/${preset_slug%.glslp}-pass${pass}.png"
         local_log="$RESULT_DIR/${preset_slug%.glslp}-pass${pass}.log"
         "${ADB[@]}" pull "$remote_screenshot" "$local_screenshot" >/dev/null
+        [ -s "$local_screenshot" ] || {
+            echo "RetroArch screenshot is empty after transfer for $preset_relative pass $pass" >&2
+            exit 1
+        }
         "${ADB[@]}" exec-out cat "$REMOTE_LOG" >"$local_log"
         grep -Fq "[Shaders] Applying shader: \"$remote_preset\"." "$local_log" || {
             echo "RetroArch did not log the applied preset for $preset_relative pass $pass" >&2
@@ -582,6 +618,7 @@ report = {
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "bundle_id": manifest["bundle_id"],
     "source": manifest["source"],
+    "sources": manifest.get("sources", [manifest["source"]]),
     "retroarch_build": {
         "version": build_manifest["retroarch_version"],
         "commit": build_manifest["commit"],

@@ -190,6 +190,10 @@ def build_report(args: argparse.Namespace) -> tuple[dict[str, Any], bool]:
         "content_name": args.content_name,
         "content_source": "device-provided-read-only",
         "shader_source": shader_manifest["source"],
+        "shader_sources": shader_manifest.get(
+            "sources",
+            [shader_manifest["source"]],
+        ),
         "shader_bundle_id": shader_manifest["bundle_id"],
         "retroarch_build": {
             "version": retroarch_build["retroarch_version"],

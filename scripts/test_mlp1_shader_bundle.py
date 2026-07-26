@@ -18,6 +18,36 @@ SPEC.loader.exec_module(shader_bundle)
 
 class ShaderBundleTests(unittest.TestCase):
     @staticmethod
+    def lock() -> dict:
+        return {
+            "schema_version": 2,
+            "selection": "unused.json",
+            "sources": [
+                {
+                    "id": "test-source",
+                    "source": "https://example.com/test.git",
+                    "commit": "0" * 40,
+                    "tree": "1" * 40,
+                    "commit_epoch": 123,
+                    "source_root": ".",
+                    "output_root": "shaders_glsl/test",
+                }
+            ],
+        }
+
+    @classmethod
+    def sources(cls, root: Path) -> dict:
+        source_lock = cls.lock()["sources"][0]
+        return {
+            "test-source": {
+                "lock": source_lock,
+                "checkout": root,
+                "root": root,
+                "output_root": PurePosixPath("shaders_glsl/test"),
+            }
+        }
+
+    @staticmethod
     def selection(path: str, evidence: str) -> dict:
         return {
             "path_limit_bytes": 240,
@@ -88,7 +118,9 @@ class ShaderBundleTests(unittest.TestCase):
                 shader_bundle.BundleError, "missing shader dependency"
             ):
                 shader_bundle.collect_files(
-                    source, self.selection("preset.glslp", "missing.glsl")
+                    self.sources(source),
+                    self.selection("preset.glslp", "missing.glsl"),
+                    self.lock(),
                 )
 
     def test_rejects_missing_license_evidence(self) -> None:
@@ -103,7 +135,9 @@ class ShaderBundleTests(unittest.TestCase):
                 shader_bundle.BundleError, "expected license evidence is absent"
             ):
                 shader_bundle.collect_files(
-                    source, self.selection("preset.glslp", "pass.glsl")
+                    self.sources(source),
+                    self.selection("preset.glslp", "pass.glsl"),
+                    self.lock(),
                 )
 
     def test_rejects_case_insensitive_collision(self) -> None:
@@ -146,7 +180,64 @@ class ShaderBundleTests(unittest.TestCase):
                 ],
             }
             with self.assertRaises(shader_bundle.BundleError):
-                shader_bundle.collect_files(source, selection)
+                shader_bundle.collect_files(
+                    self.sources(source),
+                    selection,
+                    self.lock(),
+                )
+
+    def test_collects_from_source_specific_output_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            (source / "preset.glslp").write_text(
+                'shaders = "1"\nshader0 = "pass.glsl"\n',
+                encoding="utf-8",
+            )
+            (source / "pass.glsl").write_text(
+                "// License: Public domain\n",
+                encoding="utf-8",
+            )
+            files, presets = shader_bundle.collect_files(
+                self.sources(source),
+                self.selection("preset.glslp", "pass.glsl"),
+                self.lock(),
+            )
+            self.assertEqual(
+                set(files),
+                {
+                    PurePosixPath("shaders_glsl/test/preset.glslp"),
+                    PurePosixPath("shaders_glsl/test/pass.glsl"),
+                },
+            )
+            self.assertEqual(
+                presets[0]["path"],
+                "shaders_glsl/test/preset.glslp",
+            )
+            self.assertEqual(
+                files[PurePosixPath("shaders_glsl/test/pass.glsl")][
+                    "source_path"
+                ],
+                "pass.glsl",
+            )
+
+    def test_accepts_repository_scoped_license_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            (source / "preset.glslp").write_text(
+                'shaders = "1"\nshader0 = "pass.glsl"\n',
+                encoding="utf-8",
+            )
+            (source / "pass.glsl").write_text("// shader\n", encoding="utf-8")
+            (source / "LICENSE").write_text("MIT License\n", encoding="utf-8")
+            selection = self.selection("preset.glslp", "LICENSE")
+            selection["presets"][0]["license_evidence_scope"] = "repository"
+            selection["presets"][0]["license_evidence_text"] = "MIT License"
+            files, _ = shader_bundle.collect_files(
+                self.sources(source),
+                selection,
+                self.lock(),
+            )
+            self.assertEqual(len(files), 2)
 
     def test_aggregate_qualification_uses_weakest_preset(self) -> None:
         self.assertEqual(
