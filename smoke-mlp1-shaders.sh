@@ -74,7 +74,8 @@ REMOTE_PLATFORM="$REMOTE_SD/.system/leaf/platforms/mlp1"
 REMOTE_RETROARCH="$REMOTE_PLATFORM/bin/retroarch"
 REMOTE_CORE="$REMOTE_PLATFORM/cores/${CORE_ID}_libretro.so"
 REMOTE_INFO="$REMOTE_PLATFORM/info/${CORE_ID}_libretro.info"
-REMOTE_SHADERS="$REMOTE_PLATFORM/shaders"
+REMOTE_BUNDLE="$REMOTE_PLATFORM/shaders"
+REMOTE_SHADERS="${SHADER_SMOKE_REMOTE_SHADERS:-$REMOTE_SD/.umrk/mlp1/retroarch/.config/retroarch/shaders}"
 REMOTE_CTL="$REMOTE_PLATFORM/launcher/bin/jawaka-retroarchctl"
 if [ -n "$REMOTE_CONTENT_SOURCE" ]; then
     REMOTE_FIXTURE="$REMOTE_CONTENT_SOURCE"
@@ -131,7 +132,7 @@ trap cleanup EXIT HUP INT TERM
 
 for remote_path in \
     "$REMOTE_RETROARCH" "$REMOTE_CORE" "$REMOTE_INFO" \
-    "$REMOTE_SHADERS/manifest.json" "$REMOTE_CTL"; do
+    "$REMOTE_BUNDLE/manifest.json" "$REMOTE_CTL"; do
     "${ADB[@]}" shell "test -f '$remote_path'" || {
         echo "missing staged device artifact: $remote_path" >&2
         exit 1

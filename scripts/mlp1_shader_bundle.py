@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -96,7 +97,7 @@ def locked_sources(lock: dict[str, Any]) -> list[dict[str, Any]]:
                 "commit_epoch": lock.get("commit_epoch"),
                 "checkout": "workdir/src/glsl-shaders",
                 "source_root": ".",
-                "output_root": "shaders_glsl",
+                "output_root": "leaf-bundled",
             }
         ]
     sources = lock.get("sources")
@@ -233,6 +234,11 @@ def validate_lock(lock: dict[str, Any], lock_path: Path) -> Path:
         if str(source["source_root"]) not in {"", "."}:
             normalize_source_path(str(source["source_root"]))
         output_root = normalize_source_path(str(source["output_root"])).as_posix()
+        if PurePosixPath(output_root).parts[0] != "leaf-bundled":
+            raise BundleError(
+                f"{source_id} output root must remain under leaf-bundled "
+                "so RetroArch's updater-owned shaders_glsl tree cannot overwrite it"
+            )
         if output_root.casefold() in seen_outputs:
             raise BundleError(f"duplicate source output root: {output_root}")
         seen_outputs.add(output_root.casefold())
@@ -496,7 +502,7 @@ def load_recommendations(
     return path, data
 
 
-def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
+def prepare_source_locked(source: Path, lock: dict[str, Any], fetch: bool) -> None:
     cloned = False
     if not source.exists():
         if not fetch:
@@ -529,7 +535,8 @@ def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
         if not fetch:
             raise BundleError(f"locked shader commit is absent locally: {commit}")
         run_git(source, "fetch", "--depth=1", "origin", commit)
-    run_git(source, "checkout", "--detach", "--quiet", commit)
+    if run_git(source, "rev-parse", "HEAD") != commit:
+        run_git(source, "checkout", "--detach", "--quiet", commit)
     if run_git(source, "status", "--porcelain"):
         raise BundleError(f"shader source checkout has local changes: {source}")
     if run_git(source, "rev-parse", "HEAD") != commit:
@@ -538,6 +545,18 @@ def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
         raise BundleError("shader checkout tree does not match the lock")
     if int(run_git(source, "show", "-s", "--format=%ct", "HEAD")) != lock["commit_epoch"]:
         raise BundleError("shader checkout commit timestamp does not match the lock")
+
+
+def prepare_source(source: Path, lock: dict[str, Any], fetch: bool) -> None:
+    """Prepare one pinned checkout without racing another bundle invocation."""
+    source.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = source.parent / f".{source.name}.shader-bundle.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            prepare_source_locked(source, lock, fetch)
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def prepare_sources(
@@ -874,7 +893,7 @@ def write_recommendations(
         "Leaf recommended shaders for MLP1",
         "",
         "These presets are optional and are never enabled automatically.",
-        "Each one references a tested preset in ../shaders_glsl/.",
+        "Each one references a tested preset in ../leaf-bundled/.",
         "",
     ]
     for row in recommendations["presets"]:
@@ -952,9 +971,9 @@ def write_readme(
             "qualification."
         )
     browser_note = (
-        "Start with leaf-recommended/, or browse the full shaders_glsl/ tree."
+        "Start with leaf-recommended/, or browse the qualified leaf-bundled/ tree."
         if has_recommendations
-        else "Browse these presets from RetroArch's shader menu under shaders_glsl/."
+        else "Browse these presets from RetroArch's shader menu under leaf-bundled/."
     )
     destination.write_text(
         "\n".join(

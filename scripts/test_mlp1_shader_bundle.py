@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -18,6 +20,17 @@ SPEC.loader.exec_module(shader_bundle)
 
 class ShaderBundleTests(unittest.TestCase):
     @staticmethod
+    def git(repository: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(repository), *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return result.stdout.strip()
+
+    @staticmethod
     def lock() -> dict:
         return {
             "schema_version": 2,
@@ -30,7 +43,7 @@ class ShaderBundleTests(unittest.TestCase):
                     "tree": "1" * 40,
                     "commit_epoch": 123,
                     "source_root": ".",
-                    "output_root": "shaders_glsl/test",
+                    "output_root": "leaf-bundled/test",
                 }
             ],
         }
@@ -43,7 +56,7 @@ class ShaderBundleTests(unittest.TestCase):
                 "lock": source_lock,
                 "checkout": root,
                 "root": root,
-                "output_root": PurePosixPath("shaders_glsl/test"),
+                "output_root": PurePosixPath("leaf-bundled/test"),
             }
         }
 
@@ -102,9 +115,63 @@ class ShaderBundleTests(unittest.TestCase):
     def test_rejects_fat32_reserved_filename(self) -> None:
         with self.assertRaises(shader_bundle.BundleError):
             shader_bundle.validate_bundle_path(
-                PurePosixPath("shaders_glsl/CON.glsl"),
+                PurePosixPath("leaf-bundled/CON.glsl"),
                 240,
                 {".glsl"},
+            )
+
+    def test_rejects_updater_owned_source_output_root(self) -> None:
+        lock = self.lock()
+        lock["sources"][0]["output_root"] = "shaders_glsl/test"
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / "lock.json"
+            with self.assertRaisesRegex(
+                shader_bundle.BundleError,
+                "output root must remain under leaf-bundled",
+            ):
+                shader_bundle.validate_lock(lock, lock_path)
+
+    def test_serializes_concurrent_checkout_preparation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            self.git(source, "init", "--quiet")
+            self.git(source, "config", "user.email", "tests@example.com")
+            self.git(source, "config", "user.name", "Shader Bundle Tests")
+            fixture = source / "fixture.glsl"
+            fixture.write_text("// first\n", encoding="utf-8")
+            self.git(source, "add", "fixture.glsl")
+            self.git(source, "commit", "--quiet", "-m", "first")
+            first_commit = self.git(source, "rev-parse", "HEAD")
+            fixture.write_text("// second\n", encoding="utf-8")
+            self.git(source, "commit", "--quiet", "-am", "second")
+            second_commit = self.git(source, "rev-parse", "HEAD")
+            source_lock = {
+                "source": str(source),
+                "commit": second_commit,
+                "tree": self.git(source, "rev-parse", "HEAD^{tree}"),
+                "commit_epoch": int(
+                    self.git(source, "show", "-s", "--format=%ct", "HEAD")
+                ),
+            }
+            self.git(source, "checkout", "--detach", "--quiet", first_commit)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [
+                    executor.submit(
+                        shader_bundle.prepare_source,
+                        source,
+                        source_lock,
+                        False,
+                    )
+                    for _ in range(4)
+                ]
+                for future in futures:
+                    future.result()
+
+            self.assertEqual(self.git(source, "rev-parse", "HEAD"), second_commit)
+            self.assertTrue(
+                (source.parent / ".source.shader-bundle.lock").exists()
             )
 
     def test_rejects_missing_dependency(self) -> None:
@@ -205,16 +272,16 @@ class ShaderBundleTests(unittest.TestCase):
             self.assertEqual(
                 set(files),
                 {
-                    PurePosixPath("shaders_glsl/test/preset.glslp"),
-                    PurePosixPath("shaders_glsl/test/pass.glsl"),
+                    PurePosixPath("leaf-bundled/test/preset.glslp"),
+                    PurePosixPath("leaf-bundled/test/pass.glsl"),
                 },
             )
             self.assertEqual(
                 presets[0]["path"],
-                "shaders_glsl/test/preset.glslp",
+                "leaf-bundled/test/preset.glslp",
             )
             self.assertEqual(
-                files[PurePosixPath("shaders_glsl/test/pass.glsl")][
+                files[PurePosixPath("leaf-bundled/test/pass.glsl")][
                     "source_path"
                 ],
                 "pass.glsl",
@@ -265,7 +332,7 @@ class ShaderBundleTests(unittest.TestCase):
                             "path": "leaf-recommended/subtle.glslp",
                             "display_name": "Subtle",
                             "description": "A tuned test preset.",
-                            "reference": "shaders_glsl/scanlines/base.glslp",
+                            "reference": "leaf-bundled/scanlines/base.glslp",
                             "parameters": {"DARKNESS": "0.25"},
                             "intended_systems": ["FC"],
                             "constraints": ["Test note."],
@@ -279,7 +346,7 @@ class ShaderBundleTests(unittest.TestCase):
                 (output / "leaf-recommended" / "subtle.glslp").read_text(
                     encoding="utf-8"
                 ),
-                '#reference "../shaders_glsl/scanlines/base.glslp"\n'
+                '#reference "../leaf-bundled/scanlines/base.glslp"\n'
                 'DARKNESS = "0.25"\n',
             )
 

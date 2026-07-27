@@ -84,7 +84,7 @@ Run a 60-second recommendation measurement for one staged preset and one
 read-only device content case:
 
 ```sh
-SHADER_PERF_PRESET='shaders_glsl/interpolation/sharp-bilinear-simple.glslp' \
+SHADER_PERF_PRESET='leaf-bundled/interpolation/sharp-bilinear-simple.glslp' \
 SHADER_PERF_CORE_ID=snes9x \
 SHADER_PERF_REMOTE_CONTENT='/media/sdcard1/Roms/SFC/example.zip' \
 SHADER_PERF_CONTENT_CLASS='224-line console' \

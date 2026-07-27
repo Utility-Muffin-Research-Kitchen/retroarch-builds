@@ -61,9 +61,9 @@ run_case() {
     fi
 }
 
-PT='shaders_glsl/community/pt-skywalker541/PT_SkyWalker541.glslp'
-SHIMMERLESS='shaders_glsl/community/sharp-shimmerless/sharp-shimmerless.glslp'
-HYLLIAN='shaders_glsl/crt/crt-hyllian-fast.glslp'
+PT='leaf-bundled/community/pt-skywalker541/PT_SkyWalker541.glslp'
+SHIMMERLESS='leaf-bundled/community/sharp-shimmerless/sharp-shimmerless.glslp'
+HYLLIAN='leaf-bundled/crt/crt-hyllian-fast.glslp'
 
 GBC="$ROMS_ROOT/Roms/GBC/Legend of Zelda, The - Oracle of Ages (USA, Australia).zip"
 GBA="$ROMS_ROOT/Roms/GBA/Advance Wars (USA) (Rev 1).zip"

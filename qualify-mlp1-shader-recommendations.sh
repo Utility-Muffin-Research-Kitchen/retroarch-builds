@@ -61,10 +61,10 @@ run_case() {
     fi
 }
 
-SHARP='shaders_glsl/interpolation/sharp-bilinear-simple.glslp'
-SCANLINES='shaders_glsl/scanlines/scanline-fract.glslp'
-GBA_COLOR='shaders_glsl/handheld/gba-color.glslp'
-GBC_COLOR='shaders_glsl/handheld/gbc-color.glslp'
+SHARP='leaf-bundled/interpolation/sharp-bilinear-simple.glslp'
+SCANLINES='leaf-bundled/scanlines/scanline-fract.glslp'
+GBA_COLOR='leaf-bundled/handheld/gba-color.glslp'
+GBC_COLOR='leaf-bundled/handheld/gbc-color.glslp'
 
 GBC="$ROMS_ROOT/Roms/GBC/Legend of Zelda, The - Oracle of Ages (USA, Australia).zip"
 GBA="$ROMS_ROOT/Roms/GBA/Advance Wars (USA) (Rev 1).zip"

@@ -9,7 +9,7 @@
       "commit_epoch": 1780511317,
       "checkout": "workdir/src/glsl-shaders",
       "source_root": ".",
-      "output_root": "shaders_glsl"
+      "output_root": "leaf-bundled"
     },
     {
       "id": "pt-skywalker541",
@@ -19,7 +19,7 @@
       "commit_epoch": 1783175433,
       "checkout": "workdir/src/pt-skywalker541",
       "source_root": "Standard RetroArch/shaders_glsl/handheld",
-      "output_root": "shaders_glsl/community/pt-skywalker541",
+      "output_root": "leaf-bundled/community/pt-skywalker541",
       "license_path": "LICENSE",
       "license_evidence_text": "MIT License"
     },
@@ -31,7 +31,7 @@
       "commit_epoch": 1732469781,
       "checkout": "workdir/src/sharp-shimmerless",
       "source_root": "shaders_glsl",
-      "output_root": "shaders_glsl/community/sharp-shimmerless",
+      "output_root": "leaf-bundled/community/sharp-shimmerless",
       "license_path": "LICENSE.txt",
       "license_evidence_text": "CC0 1.0 Universal"
     }

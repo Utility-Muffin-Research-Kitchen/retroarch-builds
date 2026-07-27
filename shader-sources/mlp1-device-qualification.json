@@ -99,47 +99,47 @@
   },
   "presets": [
     {
-      "path": "shaders_glsl/community/pt-skywalker541/PT_SkyWalker541.glslp",
+      "path": "leaf-bundled/community/pt-skywalker541/PT_SkyWalker541.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/community/sharp-shimmerless/sharp-shimmerless.glslp",
+      "path": "leaf-bundled/community/sharp-shimmerless/sharp-shimmerless.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/crt/crt-hyllian-fast.glslp",
+      "path": "leaf-bundled/crt/crt-hyllian-fast.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/crt/crt-lottes-fast.glslp",
+      "path": "leaf-bundled/crt/crt-lottes-fast.glslp",
       "qualification": "loads"
     },
     {
-      "path": "shaders_glsl/handheld/gba-color.glslp",
+      "path": "leaf-bundled/handheld/gba-color.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/handheld/gbc-color.glslp",
+      "path": "leaf-bundled/handheld/gbc-color.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/interpolation/sharp-bilinear-simple.glslp",
+      "path": "leaf-bundled/interpolation/sharp-bilinear-simple.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/misc/image-adjustment.glslp",
+      "path": "leaf-bundled/misc/image-adjustment.glslp",
       "qualification": "loads"
     },
     {
-      "path": "shaders_glsl/scanlines/res-independent-scanlines.glslp",
+      "path": "leaf-bundled/scanlines/res-independent-scanlines.glslp",
       "qualification": "loads"
     },
     {
-      "path": "shaders_glsl/scanlines/scanline-fract.glslp",
+      "path": "leaf-bundled/scanlines/scanline-fract.glslp",
       "qualification": "recommended"
     },
     {
-      "path": "shaders_glsl/scanlines/scanlines-sine-abs.glslp",
+      "path": "leaf-bundled/scanlines/scanlines-sine-abs.glslp",
       "qualification": "loads"
     }
   ],

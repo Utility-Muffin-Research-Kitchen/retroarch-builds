@@ -100,7 +100,7 @@
       "path": "leaf-recommended/sharp-pixels.glslp",
       "display_name": "Sharp Pixels",
       "description": "Keeps pixel art crisp at integer and non-integer scaling without adding a CRT effect.",
-      "reference": "shaders_glsl/interpolation/sharp-bilinear-simple.glslp",
+      "reference": "leaf-bundled/interpolation/sharp-bilinear-simple.glslp",
       "parameters": {},
       "intended_systems": [
         "GB",
@@ -133,7 +133,7 @@
       "path": "leaf-recommended/subtle-scanlines.glslp",
       "display_name": "Subtle Scanlines",
       "description": "Adds lightweight scanlines with reduced darkness for 8-bit, 16-bit, and PlayStation-era games.",
-      "reference": "shaders_glsl/scanlines/scanline-fract.glslp",
+      "reference": "leaf-bundled/scanlines/scanline-fract.glslp",
       "parameters": {
         "BRIGHTBOOST": "1.1",
         "DARKNESS": "0.25",
@@ -167,7 +167,7 @@
       "path": "leaf-recommended/gba-color.glslp",
       "display_name": "GBA Color",
       "description": "Tames colors authored for the original Game Boy Advance LCD.",
-      "reference": "shaders_glsl/handheld/gba-color.glslp",
+      "reference": "leaf-bundled/handheld/gba-color.glslp",
       "parameters": {},
       "intended_systems": [
         "GBA"
@@ -193,7 +193,7 @@
       "path": "leaf-recommended/gbc-color.glslp",
       "display_name": "GBC Color",
       "description": "Approximates the softer color response of the Game Boy Color LCD.",
-      "reference": "shaders_glsl/handheld/gbc-color.glslp",
+      "reference": "leaf-bundled/handheld/gbc-color.glslp",
       "parameters": {},
       "intended_systems": [
         "GBC"
@@ -219,7 +219,7 @@
       "path": "leaf-recommended/game-boy-lcd.glslp",
       "display_name": "Game Boy LCD",
       "description": "Adds a subdued Pocket-style backing texture, pixel grid, and edge shadows for original Game Boy games.",
-      "reference": "shaders_glsl/community/pt-skywalker541/PT_SkyWalker541.glslp",
+      "reference": "leaf-bundled/community/pt-skywalker541/PT_SkyWalker541.glslp",
       "parameters": {
         "PT_BACKGROUND_TINT": "1.0",
         "PT_BASE_TRANSPARENCY_AMOUNT": "0.20",
@@ -260,7 +260,7 @@
       "path": "leaf-recommended/game-boy-color-lcd.glslp",
       "display_name": "Game Boy Color LCD",
       "description": "Adds a Pocket-style backing texture and low-cost pixel grid tuned for Game Boy Color art.",
-      "reference": "shaders_glsl/community/pt-skywalker541/PT_SkyWalker541.glslp",
+      "reference": "leaf-bundled/community/pt-skywalker541/PT_SkyWalker541.glslp",
       "parameters": {
         "PT_BACKGROUND_TINT": "1.0",
         "PT_BASE_TRANSPARENCY_AMOUNT": "0.20",
@@ -301,7 +301,7 @@
       "path": "leaf-recommended/game-boy-advance-lcd.glslp",
       "display_name": "Game Boy Advance LCD",
       "description": "Adds a gray backing texture, low-cost pixel grid, and transparency response tuned for the original GBA screen.",
-      "reference": "shaders_glsl/community/pt-skywalker541/PT_SkyWalker541.glslp",
+      "reference": "leaf-bundled/community/pt-skywalker541/PT_SkyWalker541.glslp",
       "parameters": {
         "PT_BACKGROUND_TINT": "2.0",
         "PT_BASE_TRANSPARENCY_AMOUNT": "0.25",
@@ -341,7 +341,7 @@
       "path": "leaf-recommended/sharp-shimmerless.glslp",
       "display_name": "Sharp Shimmerless",
       "description": "Keeps rectangular pixels as sharp as possible at awkward non-integer scales while avoiding scrolling shimmer.",
-      "reference": "shaders_glsl/community/sharp-shimmerless/sharp-shimmerless.glslp",
+      "reference": "leaf-bundled/community/sharp-shimmerless/sharp-shimmerless.glslp",
       "parameters": {},
       "intended_systems": [
         "GB",
@@ -374,7 +374,7 @@
       "path": "leaf-recommended/crt-lite.glslp",
       "display_name": "CRT Lite",
       "description": "Adds a lightweight aperture mask and softened scanlines without curvature.",
-      "reference": "shaders_glsl/crt/crt-hyllian-fast.glslp",
+      "reference": "leaf-bundled/crt/crt-hyllian-fast.glslp",
       "parameters": {
         "BRIGHTBOOST": "1.4",
         "MASK_INTENSITY": "0.3",
