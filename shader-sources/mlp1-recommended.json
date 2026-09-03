@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "qualification_id": "mlp1-recommended-lockbump-2026-09-01",
-  "qualified_at": "2026-09-01",
+  "qualification_id": "mlp1-recommended-phase6-2026-09-02",
+  "qualified_at": "2026-09-02",
   "platform": "mlp1",
   "device": {
     "model": "Miniloong Pocket 1",
@@ -75,6 +75,24 @@
   },
   "controls": [
     {
+      "case": "Stella 2014, Atari 2600, 60Hz BFI off, no shader",
+      "result": "pass",
+      "average_fps": 60.031,
+      "maximum_frame_time_p95_ms": 19.451,
+      "dropped_frames_during_sample_window": 0,
+      "maximum_audio_underrun_pct": 0.131,
+      "note": "The full-duration control establishes headroom before the richer CRT Curved candidate."
+    },
+    {
+      "case": "Stella 2014, Atari 2600, 60Hz BFI off, CRT Curved",
+      "result": "pass",
+      "average_fps": 60.035,
+      "maximum_frame_time_p95_ms": 19.397,
+      "dropped_frames_during_sample_window": 0,
+      "maximum_audio_underrun_pct": 0.131,
+      "note": "The richest existing CRT candidate matches the control, so the lighter CRT Sharp candidate is also exposed."
+    },
+    {
       "case": "mGBA, 240x160 GBA, 120Hz BFI on, no shader",
       "result": "incompatible",
       "average_fps": 38.499,
@@ -111,14 +129,44 @@
       "reference": "leaf-bundled/interpolation/sharp-bilinear-simple.glslp",
       "parameters": {},
       "intended_systems": [
-        "GB",
-        "GBC",
-        "GBA",
+        "32X",
+        "AMIGA",
+        "ARCADE",
+        "ATARI2600",
+        "ATOMISWAVE",
+        "DC",
+        "DOS",
+        "EASYRPG",
         "FC",
-        "SFC",
+        "FDS",
+        "GB",
+        "GBA",
+        "GBC",
+        "GG",
+        "GW",
+        "LYNX",
+        "MAME",
+        "MAME2003",
+        "MAME2010",
         "MD",
+        "MD32X",
+        "MS",
+        "N64",
+        "NAOMI",
+        "NEOGEO",
+        "NGP",
+        "NGPC",
+        "PC98",
         "PCE",
-        "PS"
+        "PCECD",
+        "PICO8",
+        "PS",
+        "SATURN",
+        "SEGACD",
+        "SEVENTYEIGHTHUNDRED",
+        "SFC",
+        "WS",
+        "WSC"
       ],
       "qualification": "recommended",
       "performance": {
@@ -148,11 +196,25 @@
         "THICKNESS": "1.0"
       },
       "intended_systems": [
+        "32X",
+        "ARCADE",
+        "ATARI2600",
         "FC",
-        "SFC",
+        "FDS",
+        "MAME",
+        "MAME2003",
+        "MAME2010",
         "MD",
+        "MD32X",
+        "MS",
+        "NEOGEO",
         "PCE",
-        "PS"
+        "PCECD",
+        "PS",
+        "SATURN",
+        "SEGACD",
+        "SEVENTYEIGHTHUNDRED",
+        "SFC"
       ],
       "qualification": "recommended",
       "performance": {
@@ -352,14 +414,23 @@
       "reference": "leaf-bundled/community/sharp-shimmerless/sharp-shimmerless.glslp",
       "parameters": {},
       "intended_systems": [
+        "AMIGA",
+        "ATOMISWAVE",
+        "DC",
+        "DOS",
+        "EASYRPG",
         "GB",
-        "GBC",
         "GBA",
+        "GBC",
         "FC",
-        "SFC",
         "MD",
+        "N64",
+        "NAOMI",
+        "PC98",
         "PCE",
-        "PS"
+        "PICO8",
+        "PS",
+        "SFC"
       ],
       "qualification": "recommended",
       "performance": {
@@ -449,8 +520,15 @@
       "parameters": {},
       "intended_systems": [
         "GB",
+        "GBA",
         "GBC",
-        "GBA"
+        "GG",
+        "GW",
+        "LYNX",
+        "NGP",
+        "NGPC",
+        "WS",
+        "WSC"
       ],
       "qualification": "recommended",
       "performance": {
@@ -476,6 +554,7 @@
       "reference": "leaf-bundled/crt/zfast-crt.glslp",
       "parameters": {},
       "intended_systems": [
+        "ATARI2600",
         "FC",
         "SFC",
         "PS"
@@ -504,13 +583,14 @@
       "reference": "leaf-bundled/crt/zfast_crt_geo.glslp",
       "parameters": {},
       "intended_systems": [
+        "ATARI2600",
         "FC",
         "SFC",
         "PS"
       ],
       "qualification": "recommended",
       "performance": {
-        "case_count": 4,
+        "case_count": 5,
         "minimum_average_fps": 60.035,
         "maximum_frame_time_p95_ms": 21.273,
         "maximum_dropped_frames_during_sample_window": 53,
