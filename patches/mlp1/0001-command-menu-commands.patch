@@ -1,5 +1,5 @@
 diff --git a/command.c b/command.c
-index 791d510547..b505bdb8f2 100644
+index 791d510547..289f0081c0 100644
 --- a/command.c
 +++ b/command.c
 @@ -60,6 +60,8 @@
@@ -363,11 +363,280 @@ index 791d510547..b505bdb8f2 100644
  
  bool command_load_state_slot(command_t *cmd, const char *arg)
  {
+@@ -1923,6 +2270,268 @@ void command_event_set_replay_garbage_collect(
+ }
+ 
+ #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
++/* Leaf/Jawaka namespaced shader commands.
++ *
++ * Upstream SET_SHADER is fire-and-forget: it returns a useful boolean that the
++ * network command never sends back, so a caller cannot tell a delivered packet
++ * from a shader that actually compiled. These commands carry a caller-generated
++ * request ID and always reply, which also makes the prefix a capability probe.
++ * Upstream SET_SHADER is left untouched for its existing callers.
++ */
++
++#define JAWAKA_SHADER_REQUEST_ID_MAX 32
++
++/* Copy the leading request-ID token. Bounded, lowercase hex only: the ID is
++ * echoed straight back into a reply buffer, so it must never carry anything
++ * that could be mistaken for another field. Returns the remaining payload
++ * (after the single separating space) or NULL when the token is malformed. */
++static const char *jawaka_shader_take_request_id(
++      const char *arg, char *out, size_t out_len)
++{
++   size_t i = 0;
++
++   if (!arg || !out || out_len == 0)
++      return NULL;
++
++   while (arg[i] && arg[i] != ' ')
++   {
++      char c = arg[i];
++      if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
++         return NULL;
++      if (i + 1 >= out_len)
++         return NULL;
++      out[i] = c;
++      i++;
++   }
++
++   if (i == 0)
++      return NULL;
++   out[i] = '\0';
++
++   /* Payload is everything after one space, verbatim: a preset path may
++    * contain spaces and must not be tokenized. */
++   if (arg[i] == ' ')
++      return arg + i + 1;
++   return arg + i;
++}
++
++static void jawaka_shader_reply(command_t *cmd, const char *request_id,
++      const char *fmt, ...)
++{
++   char reply[PATH_MAX_LENGTH + 128];
++   size_t _len;
++   va_list ap;
++
++   _len = strlcpy(reply, "JAWAKA_SHADER ", sizeof(reply));
++   _len += strlcpy(reply + _len, request_id, sizeof(reply) - _len);
++   _len += strlcpy(reply + _len, " ", sizeof(reply) - _len);
++
++   va_start(ap, fmt);
++   _len += vsnprintf(reply + _len, sizeof(reply) - _len, fmt, ap);
++   va_end(ap);
++
++   if (_len >= sizeof(reply))
++      _len = sizeof(reply) - 1;
++
++   cmd->replier(cmd, reply, _len);
++}
++
++bool command_jawaka_get_shader(command_t *cmd, const char *arg)
++{
++   char request_id[JAWAKA_SHADER_REQUEST_ID_MAX];
++   runloop_state_t *runloop_st = runloop_state_get_ptr();
++
++   if (!jawaka_shader_take_request_id(arg, request_id, sizeof(request_id)))
++      return false;
++
++   if (string_is_empty(runloop_st->runtime_shader_preset_path))
++      jawaka_shader_reply(cmd, request_id, "GET NONE");
++   else
++      jawaka_shader_reply(cmd, request_id, "GET OK %s",
++            runloop_st->runtime_shader_preset_path);
++   return true;
++}
++
++static bool jawaka_shader_apply(command_t *cmd, const char *request_id,
++      const char *path, const char *operation)
++{
++   settings_t *settings = config_get_ptr();
++   enum rarch_shader_type type;
++
++   if (string_is_empty(path))
++   {
++      if (!video_shader_apply_shader(settings, RARCH_SHADER_NONE, "", true))
++      {
++         jawaka_shader_reply(cmd, request_id, "%s ERROR apply", operation);
++         return true;
++      }
++      jawaka_shader_reply(cmd, request_id, "%s OK", operation);
++      return true;
++   }
++
++   if (!path_is_valid(path))
++   {
++      jawaka_shader_reply(cmd, request_id, "%s ERROR missing", operation);
++      return true;
++   }
++
++   type = video_shader_parse_type(path);
++   if (type == RARCH_SHADER_NONE)
++   {
++      jawaka_shader_reply(cmd, request_id, "%s ERROR unsupported", operation);
++      return true;
++   }
++
++   {
++      gfx_ctx_flags_t flags;
++      flags.flags = 0;
++      video_context_driver_get_flags(&flags);
++      if (!BIT32_GET(flags.flags, video_shader_type_to_flag(type)))
++      {
++         jawaka_shader_reply(cmd, request_id, "%s ERROR unsupported", operation);
++         return true;
++      }
++   }
++
++   /* The apply boolean is the whole answer: a failed compile or link returns
++    * false here, which is what upstream SET_SHADER throws away. */
++   if (!video_shader_apply_shader(settings, type, path, true))
++      jawaka_shader_reply(cmd, request_id, "%s ERROR apply", operation);
++   else
++      jawaka_shader_reply(cmd, request_id, "%s OK", operation);
++   return true;
++}
++
++bool command_jawaka_set_shader(command_t *cmd, const char *arg)
++{
++   char request_id[JAWAKA_SHADER_REQUEST_ID_MAX];
++   const char *path = jawaka_shader_take_request_id(arg, request_id,
++         sizeof(request_id));
++
++   if (!path)
++      return false;
++   if (string_is_empty(path))
++   {
++      jawaka_shader_reply(cmd, request_id, "SET ERROR missing");
++      return true;
++   }
++   return jawaka_shader_apply(cmd, request_id, path, "SET");
++}
++
++bool command_jawaka_clear_shader(command_t *cmd, const char *arg)
++{
++   char request_id[JAWAKA_SHADER_REQUEST_ID_MAX];
++   bool handled;
++
++   if (!jawaka_shader_take_request_id(arg, request_id, sizeof(request_id)))
++      return false;
++   /* An explicit command rather than SET with an empty argument: that would
++    * depend on arg+1 landing on the string terminator. */
++   handled = jawaka_shader_apply(cmd, request_id, "", "CLEAR");
++
++#ifdef HAVE_MENU
++   /* Clearing the runtime shader leaves the menu shader manager holding the
++    * passes that were just removed, so a following save would write a preset
++    * for a shader that is no longer applied. Zero it through RetroArch's own
++    * API so the two stay consistent. */
++   {
++      struct video_shader *menu_shader = menu_shader_get();
++      if (menu_shader)
++         menu_shader_manager_clear_num_passes(menu_shader);
++   }
++#endif
++
++   return handled;
++}
++
++#ifdef HAVE_MENU
++static bool jawaka_shader_parse_scope(const char *token,
++      enum auto_shader_type *out)
++{
++   if (string_is_equal(token, "GLOBAL"))
++      *out = SHADER_PRESET_GLOBAL;
++   else if (string_is_equal(token, "CORE"))
++      *out = SHADER_PRESET_CORE;
++   else if (string_is_equal(token, "PARENT"))
++      *out = SHADER_PRESET_PARENT;
++   else if (string_is_equal(token, "GAME"))
++      *out = SHADER_PRESET_GAME;
++   else
++      return false;
++   return true;
++}
++
++bool command_jawaka_save_shader_preset(command_t *cmd, const char *arg)
++{
++   char request_id[JAWAKA_SHADER_REQUEST_ID_MAX];
++   enum auto_shader_type scope;
++   settings_t *settings        = config_get_ptr();
++   struct video_shader *shader = menu_shader_get();
++   const char *token           = jawaka_shader_take_request_id(arg, request_id,
++         sizeof(request_id));
++
++   if (!token)
++      return false;
++   /* Scopes only. A path here would let a caller write a preset anywhere. */
++   if (!jawaka_shader_parse_scope(token, &scope))
++   {
++      jawaka_shader_reply(cmd, request_id, "SAVE %s ERROR", token);
++      return true;
++   }
++   /* Nothing to save is an error, not an empty success: saving a zero-pass
++    * shader would silently install a preset that disables shaders. */
++   if (!shader || shader->passes == 0)
++   {
++      jawaka_shader_reply(cmd, request_id, "SAVE %s ERROR", token);
++      return true;
++   }
++
++   if (!menu_shader_manager_save_auto_preset(shader, scope,
++            settings->paths.directory_video_shader,
++            settings->paths.directory_menu_config,
++            false))
++      jawaka_shader_reply(cmd, request_id, "SAVE %s ERROR", token);
++   else
++      jawaka_shader_reply(cmd, request_id, "SAVE %s OK", token);
++   return true;
++}
++
++bool command_jawaka_remove_shader_preset(command_t *cmd, const char *arg)
++{
++   char request_id[JAWAKA_SHADER_REQUEST_ID_MAX];
++   enum auto_shader_type scope;
++   settings_t *settings = config_get_ptr();
++   const char *token    = jawaka_shader_take_request_id(arg, request_id,
++         sizeof(request_id));
++
++   if (!token)
++      return false;
++   if (!jawaka_shader_parse_scope(token, &scope))
++   {
++      jawaka_shader_reply(cmd, request_id, "REMOVE %s ERROR", token);
++      return true;
++   }
++
++   /* ABSENT is distinct from a failed delete, so the caller can tell "there was
++    * nothing there" from "it is still there". */
++   if (!menu_shader_manager_auto_preset_exists(scope,
++            settings->paths.directory_video_shader,
++            settings->paths.directory_menu_config))
++   {
++      jawaka_shader_reply(cmd, request_id, "REMOVE %s ABSENT", token);
++      return true;
++   }
++
++   if (!menu_shader_manager_remove_auto_preset(scope,
++            settings->paths.directory_video_shader,
++            settings->paths.directory_menu_config))
++      jawaka_shader_reply(cmd, request_id, "REMOVE %s ERROR", token);
++   else
++      jawaka_shader_reply(cmd, request_id, "REMOVE %s OK", token);
++   return true;
++}
++#endif /* HAVE_MENU */
++
+ bool command_set_shader(command_t *cmd, const char *arg)
+ {
+    enum  rarch_shader_type type = video_shader_parse_type(arg);
 diff --git a/command.h b/command.h
-index 6fd256541b..d005f79753 100644
+index 6fd256541b..eee30f3174 100644
 --- a/command.h
 +++ b/command.h
-@@ -425,7 +425,20 @@ struct cmd_action_map
+@@ -425,8 +425,30 @@ struct cmd_action_map
  bool command_version(command_t *cmd, const char* arg);
  bool command_get_status(command_t *cmd, const char* arg);
  bool command_get_config_param(command_t *cmd, const char* arg);
@@ -386,9 +655,34 @@ index 6fd256541b..d005f79753 100644
 +bool command_set_state_slot(command_t *cmd, const char *arg);
 +bool command_save_state_slot(command_t *cmd, const char *arg);
  bool command_load_state_slot(command_t *cmd, const char* arg);
++#if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
++bool command_jawaka_get_shader(command_t *cmd, const char *arg);
++bool command_jawaka_set_shader(command_t *cmd, const char *arg);
++bool command_jawaka_clear_shader(command_t *cmd, const char *arg);
++#ifdef HAVE_MENU
++bool command_jawaka_save_shader_preset(command_t *cmd, const char *arg);
++bool command_jawaka_remove_shader_preset(command_t *cmd, const char *arg);
++#endif
++#endif
  bool command_play_replay_slot(command_t *cmd, const char* arg);
  bool command_seek_replay(command_t *cmd, const char *arg);
-@@ -446,6 +456,7 @@ static const struct cmd_action_map action_map[] = {
+ bool command_save_savefiles(command_t *cmd, const char* arg);
+@@ -442,10 +464,22 @@ bool command_load_core(command_t *cmd, const char* arg);
+ static const struct cmd_action_map action_map[] = {
+ #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
+    { "SET_SHADER",       command_set_shader,       "<shader path>" },
++   /* Leaf/Jawaka namespaced shader commands. Every one replies, and the prefix
++    * is both the capability probe and protection from a future upstream
++    * namespace collision. Longer names are listed before shorter prefixes of
++    * themselves so lookup cannot match the wrong entry. */
++   { "JAWAKA_GET_SHADER",           command_jawaka_get_shader,    "<request id>" },
++   { "JAWAKA_SET_SHADER",           command_jawaka_set_shader,    "<request id> <shader path>" },
++   { "JAWAKA_CLEAR_SHADER",         command_jawaka_clear_shader,  "<request id>" },
++#ifdef HAVE_MENU
++   { "JAWAKA_SAVE_SHADER_PRESET",   command_jawaka_save_shader_preset,   "<request id> GAME|PARENT|CORE|GLOBAL" },
++   { "JAWAKA_REMOVE_SHADER_PRESET", command_jawaka_remove_shader_preset, "<request id> GAME|PARENT|CORE|GLOBAL" },
++#endif
+ #endif
     { "VERSION",          command_version,          "No argument"},
     { "GET_STATUS",       command_get_status,       "No argument" },
     { "GET_CONFIG_PARAM", command_get_config_param, "<param name>" },
@@ -396,7 +690,7 @@ index 6fd256541b..d005f79753 100644
     { "SHOW_MSG",         command_show_osd_msg,     "No argument" },
  #if defined(HAVE_CHEEVOS)
     /* These functions use achievement addresses and only work if a game with achievements is
-@@ -456,6 +468,19 @@ static const struct cmd_action_map action_map[] = {
+@@ -456,6 +490,19 @@ static const struct cmd_action_map action_map[] = {
     { "READ_CORE_MEMORY", command_read_memory,      "<address> <number of bytes>" },
     { "WRITE_CORE_MEMORY",command_write_memory,     "<address> <byte1> <byte2> ..." },
  
