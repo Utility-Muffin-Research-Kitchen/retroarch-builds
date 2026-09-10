@@ -4,6 +4,6 @@
   "platform": "shared",
   "pak_version": "0.1.0",
   "min_jawaka_version": "0.0.1",
-  "author": "libretro & Utility Muffin Research Kitchen",
+  "author": "libretro & UMRK",
   "description": "Opens RetroArch's own menu, so its settings, controls, shaders and core options can be changed directly instead of only from inside a running game."
 }
