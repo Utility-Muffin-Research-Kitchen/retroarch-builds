@@ -14,7 +14,7 @@ JAWAKA_SDCARD_ROOT ?= $(WORKSPACE_ROOT)/Jawaka/mock-sdcard
 SDCARD_PATH ?= $(JAWAKA_SDCARD_ROOT)
 APPS_PATH ?= $(SDCARD_PATH)/Apps
 
-.PHONY: package package-native package-platform package-mlp1 install-jawaka-app adb-stage-pak-mlp1 shaders-mlp1 validate-shaders-mlp1 test-shaders-mlp1 smoke-shaders-mlp1 performance-shader-mlp1 qualify-shader-recommendations-mlp1 qualify-shader-expansion-mlp1 assets-mlp1 validate-assets-mlp1 test-assets-mlp1 clean
+.PHONY: package package-native package-platform package-mlp1 install-jawaka-app adb-stage-pak-mlp1 shaders-mlp1 validate-shaders-mlp1 test-shaders-mlp1 smoke-shaders-mlp1 performance-shader-mlp1 qualify-shader-recommendations-mlp1 qualify-shader-expansion-mlp1 assets-mlp1 validate-assets-mlp1 test-assets-mlp1 advanced-shader-menu-patch-test clean
 
 shaders-mlp1:
 	$(PYTHON) "$(MLP1_SHADER_TOOL)" build --output "$(MLP1_SHADER_OUTPUT)"
@@ -33,6 +33,9 @@ validate-shaders-mlp1:
 
 test-shaders-mlp1:
 	$(PYTHON) -m unittest discover -s scripts -p 'test_mlp1_shader_bundle.py'
+
+advanced-shader-menu-patch-test:
+	bash scripts/check-advanced-shader-menu-patch.sh
 
 smoke-shaders-mlp1:
 	./smoke-mlp1-shaders.sh
