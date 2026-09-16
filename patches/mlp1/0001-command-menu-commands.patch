@@ -1,14 +1,18 @@
 diff --git a/command.c b/command.c
-index 791d510547..289f0081c0 100644
+index 791d510547..595d1cb761 100644
 --- a/command.c
 +++ b/command.c
-@@ -44,3 +44,5 @@
+@@ -43,7 +43,9 @@
+ #endif
+ 
  #ifdef HAVE_MENU
 +#include "menu/menu_displaylist.h"
  #include "menu/menu_driver.h"
 +#include "menu/menu_entries.h"
  #endif
-@@ -60,6 +60,8 @@
+ 
+ #ifdef HAVE_NETWORKING
+@@ -60,6 +62,8 @@
  #include "cheat_manager.h"
  #include "content.h"
  #include "dynamic.h"
@@ -17,7 +21,7 @@ index 791d510547..289f0081c0 100644
  #include "list_special.h"
  #include "paths.h"
  #include "retroarch.h"
-@@ -737,6 +739,392 @@ bool command_show_osd_msg(command_t *cmd, const char* arg)
+@@ -737,6 +741,505 @@ bool command_show_osd_msg(command_t *cmd, const char* arg)
      return true;
  }
  
@@ -407,22 +411,135 @@ index 791d510547..289f0081c0 100644
 +   return ret;
 +}
 +
++/* UMRK power-hold save capability. Reply:
++ *   GET_STATE_SAVE_INFO 1 <serialized bytes> <compressed 0|1>
++ *   GET_STATE_SAVE_INFO 1 NO
++ * The leading 1 is the SAVE_STATE_SYNC protocol version. Clients that
++ * get no reply or an unknown version must not request a synchronous save. */
++bool command_get_state_save_info(command_t *cmd, const char *arg)
++{
++   char reply[128]  = "";
++   size_t _len      = 0;
++   bool compressed  = false;
++   (void)arg;
++
++#if defined(HAVE_ZLIB)
++   {
++      settings_t *settings = config_get_ptr();
++      compressed = settings && settings->bools.savestate_file_compression;
++   }
++#endif
++
++   if (   !core_info_current_supports_savestate()
++       || core_serialize_size() == 0)
++      _len = strlcpy(reply, "GET_STATE_SAVE_INFO 1 NO", sizeof(reply));
++   else
++      _len = snprintf(reply, sizeof(reply), "GET_STATE_SAVE_INFO 1 %llu %d",
++            (unsigned long long)content_get_serialized_size(),
++            compressed ? 1 : 0);
++
++   cmd->replier(cmd, reply, _len);
++   return true;
++}
++
++static bool command_sync_request_id_valid(const char *id)
++{
++   size_t i;
++   if (!id || !*id)
++      return false;
++   for (i = 0; id[i]; i++)
++   {
++      char c = id[i];
++      if (i >= 32)
++         return false;
++      if (!(   (c >= '0' && c <= '9')
++            || (c >= 'a' && c <= 'z')
++            || (c >= 'A' && c <= 'Z')
++            || c == '-' || c == '_'))
++         return false;
++   }
++   return true;
++}
++
++/* UMRK power-hold save: SAVE_STATE_SYNC <id> <slot> <max bytes> <start by ms>
++ * Writes the slot's state to "<slot path>.tmp-<id>" synchronously, fsyncs it,
++ * and replies exactly once:
++ *   SAVE_STATE_SYNC <id> TMP_READY <bytes> <temporary path>
++ *   SAVE_STATE_SYNC <id> ERROR <code>
++ * The client owns publication: RetroArch never renames the temporary file, so
++ * a reply the client gave up on can never replace the existing slot. */
++bool command_save_state_sync(command_t *cmd, const char *arg)
++{
++   char id[33]                      = "";
++   char state_path[PATH_MAX_LENGTH] = "";
++   char tmp_path[PATH_MAX_LENGTH]   = "";
++   char reply[PATH_MAX_LENGTH + 96] = "";
++   long slot                        = 0;
++   unsigned long long max_bytes     = 0;
++   long long start_by_ms            = 0;
++   char trailing                    = 0;
++   size_t written                   = 0;
++   const char *error                = NULL;
++   enum content_sync_save_result result;
++
++   if (  !arg
++       || sscanf(arg, "%32s %ld %llu %lld %c", id, &slot, &max_bytes,
++             &start_by_ms, &trailing) != 4
++       || !command_sync_request_id_valid(id))
++   {
++      /* No trustworthy id to echo. */
++      strlcpy(reply, "SAVE_STATE_SYNC - ERROR BAD_ARGS", sizeof(reply));
++      cmd->replier(cmd, reply, strlen(reply));
++      return false;
++   }
++
++   if (slot < 0 || slot > 999 || max_bytes == 0 || start_by_ms <= 0)
++      error = "BAD_ARGS";
++   else if (!runloop_get_savestate_path(state_path, sizeof(state_path), (int)slot))
++      error = "PATH";
++   else if ((size_t)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp-%s",
++            state_path, id) >= sizeof(tmp_path))
++      error = "PATH";
++
++   if (!error)
++   {
++      result = content_save_state_sync_file(tmp_path, (uint64_t)max_bytes,
++            (int64_t)start_by_ms, &written);
++      if (result != CONTENT_SYNC_SAVE_OK)
++         error = content_sync_save_result_str(result);
++   }
++
++   if (error)
++   {
++      RARCH_WARN("[State] SAVE_STATE_SYNC %s failed: %s\n", id, error);
++      snprintf(reply, sizeof(reply), "SAVE_STATE_SYNC %s ERROR %s", id, error);
++      cmd->replier(cmd, reply, strlen(reply));
++      return false;
++   }
++
++   RARCH_LOG("[State] SAVE_STATE_SYNC %s ready: %llu bytes\n",
++         id, (unsigned long long)written);
++   snprintf(reply, sizeof(reply), "SAVE_STATE_SYNC %s TMP_READY %llu %s",
++         id, (unsigned long long)written, tmp_path);
++   cmd->replier(cmd, reply, strlen(reply));
++   return true;
++}
  
  bool command_load_state_slot(command_t *cmd, const char *arg)
  {
-@@ -1047,5 +1394,10 @@ bool command_get_status(command_t *cmd, const char* arg)
+@@ -1046,6 +1549,11 @@ bool command_get_status(command_t *cmd, const char* arg)
+       core_info_get_current_core(&core_info);
+ 
        _len     = strlcpy(reply, "GET_STATUS ", sizeof(reply));
--      if (runloop_st->flags & RUNLOOP_FLAG_PAUSED)
 +#ifdef HAVE_MENU
 +      if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
 +         _len += strlcpy(reply + _len, "MENU", sizeof(reply) - _len);
 +      else
 +#endif
-+      if (runloop_st->flags & RUNLOOP_FLAG_PAUSED)
+       if (runloop_st->flags & RUNLOOP_FLAG_PAUSED)
           _len += strlcpy(reply + _len, "PAUSED", sizeof(reply) - _len);
        else
-          _len += strlcpy(reply + _len, "PLAYING", sizeof(reply) - _len);
-@@ -1923,6 +2270,268 @@ void command_event_set_replay_garbage_collect(
+@@ -1923,6 +2431,268 @@ void command_event_set_replay_garbage_collect(
  }
  
  #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
@@ -692,10 +809,10 @@ index 791d510547..289f0081c0 100644
  {
     enum  rarch_shader_type type = video_shader_parse_type(arg);
 diff --git a/command.h b/command.h
-index 6fd256541b..eee30f3174 100644
+index 6fd256541b..28f96329c6 100644
 --- a/command.h
 +++ b/command.h
-@@ -425,8 +425,30 @@ struct cmd_action_map
+@@ -425,8 +425,32 @@ struct cmd_action_map
  bool command_version(command_t *cmd, const char* arg);
  bool command_get_status(command_t *cmd, const char* arg);
  bool command_get_config_param(command_t *cmd, const char* arg);
@@ -713,6 +830,8 @@ index 6fd256541b..eee30f3174 100644
 +bool command_get_state_slot(command_t *cmd, const char *arg);
 +bool command_set_state_slot(command_t *cmd, const char *arg);
 +bool command_save_state_slot(command_t *cmd, const char *arg);
++bool command_get_state_save_info(command_t *cmd, const char *arg);
++bool command_save_state_sync(command_t *cmd, const char *arg);
  bool command_load_state_slot(command_t *cmd, const char* arg);
 +#if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
 +bool command_jawaka_get_shader(command_t *cmd, const char *arg);
@@ -726,7 +845,7 @@ index 6fd256541b..eee30f3174 100644
  bool command_play_replay_slot(command_t *cmd, const char* arg);
  bool command_seek_replay(command_t *cmd, const char *arg);
  bool command_save_savefiles(command_t *cmd, const char* arg);
-@@ -442,10 +464,22 @@ bool command_load_core(command_t *cmd, const char* arg);
+@@ -442,10 +466,22 @@ bool command_load_core(command_t *cmd, const char* arg);
  static const struct cmd_action_map action_map[] = {
  #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
     { "SET_SHADER",       command_set_shader,       "<shader path>" },
@@ -749,7 +868,7 @@ index 6fd256541b..eee30f3174 100644
     { "SHOW_MSG",         command_show_osd_msg,     "No argument" },
  #if defined(HAVE_CHEEVOS)
     /* These functions use achievement addresses and only work if a game with achievements is
-@@ -456,6 +490,19 @@ static const struct cmd_action_map action_map[] = {
+@@ -456,6 +492,21 @@ static const struct cmd_action_map action_map[] = {
     { "READ_CORE_MEMORY", command_read_memory,      "<address> <number of bytes>" },
     { "WRITE_CORE_MEMORY",command_write_memory,     "<address> <byte1> <byte2> ..." },
  
@@ -765,10 +884,50 @@ index 6fd256541b..eee30f3174 100644
 +   { "GET_STATE_SLOT",   command_get_state_slot,   "No argument" },
 +   { "SET_STATE_SLOT",   command_set_state_slot,   "<slot number>" },
 +   { "SAVE_STATE_SLOT",  command_save_state_slot,  "<slot number>" },
++   { "GET_STATE_SAVE_INFO", command_get_state_save_info, "No argument" },
++   { "SAVE_STATE_SYNC", command_save_state_sync, "<request id> <slot> <max bytes> <start by monotonic ms>" },
 +
     { "LOAD_STATE_SLOT",command_load_state_slot, "<slot number>"},
     { "PLAY_REPLAY_SLOT",command_play_replay_slot, "<slot number>"},
     { "SEEK_REPLAY",command_seek_replay, "<frame number>"},
+diff --git a/content.h b/content.h
+index 612bc4e185..5726cd79b3 100644
+--- a/content.h
++++ b/content.h
+@@ -57,6 +57,33 @@ bool content_save_state(const char *path, bool save_to_disk);
+ /* Save an automatic savestate to disk. */
+ bool content_auto_save_state(const char *path);
+ 
++/* Result of content_save_state_sync_file(). */
++enum content_sync_save_result
++{
++   CONTENT_SYNC_SAVE_OK = 0,
++   CONTENT_SYNC_SAVE_UNSUPPORTED,
++   CONTENT_SYNC_SAVE_COMPRESSED,
++   CONTENT_SYNC_SAVE_BUSY,
++   CONTENT_SYNC_SAVE_SERIALIZE,
++   CONTENT_SYNC_SAVE_TOO_LARGE,
++   CONTENT_SYNC_SAVE_LATE,
++   CONTENT_SYNC_SAVE_OPEN,
++   CONTENT_SYNC_SAVE_WRITE,
++   CONTENT_SYNC_SAVE_FSYNC,
++   CONTENT_SYNC_SAVE_CLOSE
++};
++
++/* UMRK: serialize and write an uncompressed state to a new file at @path,
++ * blocking, with no thumbnail. The file is created exclusively, fully
++ * written, fsync'd and closed before OK is returned; on any failure the
++ * partial file is removed. Fails LATE without opening @path when
++ * CLOCK_MONOTONIC is past @start_by_ms, and TOO_LARGE when the serialized
++ * state exceeds @max_bytes. */
++enum content_sync_save_result content_save_state_sync_file(const char *path,
++      uint64_t max_bytes, int64_t start_by_ms, size_t *out_len);
++
++const char *content_sync_save_result_str(enum content_sync_save_result result);
++
+ /* Check a ram state write to disk. */
+ bool content_ram_state_pending(void);
+ 
 diff --git a/runloop.c b/runloop.c
 index 679517b280..0f6c84030b 100644
 --- a/runloop.c
@@ -808,3 +967,150 @@ index e9c72b72dc..e1bbeaa438 100644
  bool runloop_get_current_savestate_path(char *path, size_t len);
  
  bool runloop_get_savestate_path(char *path, size_t len, int slot);
+diff --git a/tasks/task_save.c b/tasks/task_save.c
+index 343a7e288b..5591326ca1 100644
+--- a/tasks/task_save.c
++++ b/tasks/task_save.c
+@@ -13,8 +13,11 @@
+  *  You should have received a copy of the GNU General Public License along with RetroArch.
+  *  If not, see <http://www.gnu.org/licenses/>.
+  */
++#include <errno.h>
++#include <fcntl.h>
+ #include <stdint.h>
+ #include <stdlib.h>
++#include <unistd.h>
+ #include <sys/types.h>
+ #include <string.h>
+ #include <time.h>
+@@ -1389,6 +1392,130 @@ bool content_auto_save_state(const char *path)
+    return true;
+ }
+ 
++static bool content_save_state_in_progress(void* data);
++bool content_load_state_in_progress(void* data);
++
++static int64_t content_sync_save_now_ms(void)
++{
++   struct timespec ts;
++   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
++      return -1;
++   return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++}
++
++const char *content_sync_save_result_str(enum content_sync_save_result result)
++{
++   switch (result)
++   {
++      case CONTENT_SYNC_SAVE_OK:          return "OK";
++      case CONTENT_SYNC_SAVE_UNSUPPORTED: return "UNSUPPORTED";
++      case CONTENT_SYNC_SAVE_COMPRESSED:  return "COMPRESSED";
++      case CONTENT_SYNC_SAVE_BUSY:        return "BUSY";
++      case CONTENT_SYNC_SAVE_SERIALIZE:   return "SERIALIZE";
++      case CONTENT_SYNC_SAVE_TOO_LARGE:   return "TOO_LARGE";
++      case CONTENT_SYNC_SAVE_LATE:        return "LATE";
++      case CONTENT_SYNC_SAVE_OPEN:        return "OPEN";
++      case CONTENT_SYNC_SAVE_WRITE:       return "WRITE";
++      case CONTENT_SYNC_SAVE_FSYNC:       return "FSYNC";
++      case CONTENT_SYNC_SAVE_CLOSE:       return "CLOSE";
++   }
++   return "UNKNOWN";
++}
++
++enum content_sync_save_result content_save_state_sync_file(const char *path,
++      uint64_t max_bytes, int64_t start_by_ms, size_t *out_len)
++{
++   size_t _len;
++   size_t done;
++   int fd;
++   int64_t now_ms;
++   void *serial_data  = NULL;
++   settings_t *settings = config_get_ptr();
++
++   if (out_len)
++      *out_len = 0;
++   if (!path || !*path || max_bytes == 0)
++      return CONTENT_SYNC_SAVE_UNSUPPORTED;
++   if (!core_info_current_supports_savestate() || core_serialize_size() == 0)
++      return CONTENT_SYNC_SAVE_UNSUPPORTED;
++#if defined(HAVE_ZLIB)
++   /* The power-hold budget was measured on uncompressed writes. */
++   if (settings && settings->bools.savestate_file_compression)
++      return CONTENT_SYNC_SAVE_COMPRESSED;
++#else
++   (void)settings;
++#endif
++   if (content_save_state_in_progress(NULL) || content_load_state_in_progress(NULL))
++      return CONTENT_SYNC_SAVE_BUSY;
++   if (content_get_serialized_size() > max_bytes)
++      return CONTENT_SYNC_SAVE_TOO_LARGE;
++   if ((now_ms = content_sync_save_now_ms()) < 0 || now_ms > start_by_ms)
++      return CONTENT_SYNC_SAVE_LATE;
++
++   if (!(serial_data = content_get_serialized_data(&_len)))
++      return CONTENT_SYNC_SAVE_SERIALIZE;
++
++   /* Recheck both bounds after serialization and before touching the disk:
++    * a late write must not begin after the admitted window. */
++   if ((uint64_t)_len > max_bytes)
++   {
++      free(serial_data);
++      return CONTENT_SYNC_SAVE_TOO_LARGE;
++   }
++   if ((now_ms = content_sync_save_now_ms()) < 0 || now_ms > start_by_ms)
++   {
++      free(serial_data);
++      return CONTENT_SYNC_SAVE_LATE;
++   }
++
++   fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
++   if (fd < 0)
++   {
++      RARCH_ERR("[State] Sync save could not create \"%s\": %s\n",
++            path, strerror(errno));
++      free(serial_data);
++      return CONTENT_SYNC_SAVE_OPEN;
++   }
++
++   for (done = 0; done < _len; )
++   {
++      ssize_t n = write(fd, (const char*)serial_data + done, _len - done);
++      if (n < 0 && errno == EINTR)
++         continue;
++      if (n <= 0)
++      {
++         RARCH_ERR("[State] Sync save write failed for \"%s\": %s\n",
++               path, n < 0 ? strerror(errno) : "short write");
++         close(fd);
++         unlink(path);
++         free(serial_data);
++         return CONTENT_SYNC_SAVE_WRITE;
++      }
++      done += (size_t)n;
++   }
++   free(serial_data);
++
++   if (fsync(fd) != 0)
++   {
++      RARCH_ERR("[State] Sync save fsync failed for \"%s\": %s\n",
++            path, strerror(errno));
++      close(fd);
++      unlink(path);
++      return CONTENT_SYNC_SAVE_FSYNC;
++   }
++   if (close(fd) != 0)
++   {
++      RARCH_ERR("[State] Sync save close failed for \"%s\": %s\n",
++            path, strerror(errno));
++      unlink(path);
++      return CONTENT_SYNC_SAVE_CLOSE;
++   }
++
++   if (out_len)
++      *out_len = _len;
++   return CONTENT_SYNC_SAVE_OK;
++}
++
+ /**
+  * content_save_state:
+  * @path      : path of saved state that shall be written to.
