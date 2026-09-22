@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "build-mlp1-ffmpeg.py"
@@ -16,6 +17,35 @@ SPEC.loader.exec_module(MODULE)
 
 
 class SourceLockTests(unittest.TestCase):
+    def test_stale_output_is_cleared_before_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            output = root / "ffmpeg"
+            output.mkdir()
+            (output / "old-library.so").write_bytes(b"stale")
+            old_output, old_stamp = MODULE.OUTPUT, MODULE.STAMP
+            MODULE.OUTPUT, MODULE.STAMP = output, output / "input-stamp.json"
+
+            def fake_run(*args: str, capture: bool = False) -> str:
+                if args[:3] == ("docker", "image", "inspect"):
+                    return "sha256:test"
+                if "/workspace/build-mlp1-ffmpeg.sh" in args:
+                    (output / "configure-inputs.txt").write_text("fixed inputs\n", encoding="utf-8")
+                return ""
+
+            try:
+                with (patch.object(MODULE, "source_checkouts", return_value={
+                        "mpp": root / "mpp", "ffmpeg-rockchip": root / "ff"}),
+                      patch.object(MODULE, "run", side_effect=fake_run),
+                      patch.object(MODULE, "stamp_inputs", return_value={"version": 1}),
+                      patch.object(MODULE, "verify_output"),
+                      patch.object(MODULE, "output_hashes", return_value={})):
+                    MODULE.main()
+                self.assertFalse((output / "old-library.so").exists())
+                self.assertTrue(MODULE.STAMP.is_file())
+            finally:
+                MODULE.OUTPUT, MODULE.STAMP = old_output, old_stamp
+
     def test_clean_pinned_sources_required(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

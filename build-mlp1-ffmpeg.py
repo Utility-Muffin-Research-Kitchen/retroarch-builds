@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -109,8 +110,9 @@ def main() -> None:
         except (OSError, ValueError, subprocess.CalledProcessError):
             pass
 
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    STAMP.unlink(missing_ok=True)
+    if OUTPUT.exists():
+        shutil.rmtree(OUTPUT)
+    OUTPUT.mkdir(parents=True)
     run("docker", "run", "--rm", "--platform", "linux/arm64",
         "-v", f"{ROOT}:/workspace:ro",
         "-v", f"{paths['mpp']}:/work/mpp",
