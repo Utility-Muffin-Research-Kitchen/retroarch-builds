@@ -22,6 +22,11 @@ MLP1_ENABLE_UDEV="${MLP1_ENABLE_UDEV:-auto}"
 MLP1_ENABLE_MALI_FBDEV="${MLP1_ENABLE_MALI_FBDEV:-0}"
 MLP1_APPLY_COMMON_PATCHES="${MLP1_APPLY_COMMON_PATCHES:-0}"
 MLP1_PATCH_SET="${MLP1_PATCH_SET:-}"
+MLP1_REQUIRE_FFMPEG="${MLP1_REQUIRE_FFMPEG:-0}"
+if [[ "$MLP1_REQUIRE_FFMPEG" != 0 && "$MLP1_REQUIRE_FFMPEG" != 1 ]]; then
+    echo "MLP1_REQUIRE_FFMPEG must be 0 or 1" >&2
+    exit 2
+fi
 
 if [[ "${IN_MLP1_CONTAINER:-0}" != "1" ]]; then
     if [[ -z "$TOOLCHAIN_REPO" ]]; then
@@ -50,6 +55,7 @@ if [[ "${IN_MLP1_CONTAINER:-0}" != "1" ]]; then
         -e MLP1_ENABLE_MALI_FBDEV="$MLP1_ENABLE_MALI_FBDEV" \
         -e MLP1_APPLY_COMMON_PATCHES="$MLP1_APPLY_COMMON_PATCHES" \
         -e MLP1_PATCH_SET="$MLP1_PATCH_SET" \
+        -e MLP1_REQUIRE_FFMPEG="$MLP1_REQUIRE_FFMPEG" \
         -v "$REPO_ROOT":/workspace \
         -v "$TOOLCHAIN_REPO":/mlp1-toolchain:ro \
         -w /workspace \
@@ -250,8 +256,13 @@ make distclean >/dev/null 2>&1 || true
 # SONAMEs are 60/60/58/7/4 against the device's 58/58/56/5/3, so nothing stock
 # is shadowed and the two sets coexist.
 MLP1_FFMPEG_DIR="${MLP1_FFMPEG_DIR:-/workspace/output/mlp1/ffmpeg}"
+MLP1_FFMPEG_INPUT_STAMP="$MLP1_FFMPEG_DIR/input-stamp.json"
 ffmpeg_flag="--disable-ffmpeg"
 if [[ -d "$MLP1_FFMPEG_DIR/lib" && -f "$MLP1_FFMPEG_DIR/lib/pkgconfig/libavcodec.pc" ]]; then
+    if [[ "$MLP1_REQUIRE_FFMPEG" == 1 && ! -f "$MLP1_FFMPEG_INPUT_STAMP" ]]; then
+        echo "required FFmpeg input stamp is missing: $MLP1_FFMPEG_INPUT_STAMP" >&2
+        exit 1
+    fi
     echo "staging FFmpeg from $MLP1_FFMPEG_DIR into the sysroot"
     cp -a "$MLP1_FFMPEG_DIR"/lib/lib*.so* "$SYSROOT/usr/lib/"
     cp -a "$MLP1_FFMPEG_DIR"/include/* "$SYSROOT/usr/include/"
@@ -271,6 +282,10 @@ if [[ -d "$MLP1_FFMPEG_DIR/lib" && -f "$MLP1_FFMPEG_DIR/lib/pkgconfig/libavcodec
     # then $$ORIGIN survived make and was eaten by the shell as "/../lib/ffmpeg".
     # Both linked and reported success. patchelf writes the bytes directly.
 else
+    if [[ "$MLP1_REQUIRE_FFMPEG" == 1 ]]; then
+        echo "required FFmpeg output is missing: $MLP1_FFMPEG_DIR" >&2
+        exit 1
+    fi
     echo "no FFmpeg at $MLP1_FFMPEG_DIR -- building without recording support"
     echo "  (run build-mlp1-ffmpeg.sh first if you want h264_rkmpp recording)"
 fi
@@ -373,6 +388,10 @@ json_array() {
 }
 
 commit="$(git -C "$RETROARCH_SRC_DIR" rev-parse HEAD)"
+ffmpeg_input_stamp_sha256=""
+if [[ "$ffmpeg_flag" == "--enable-ffmpeg" && -f "$MLP1_FFMPEG_INPUT_STAMP" ]]; then
+    ffmpeg_input_stamp_sha256="$(sha256sum "$MLP1_FFMPEG_INPUT_STAMP" | cut -d' ' -f1)"
+fi
 mkdir -p "$(dirname "$BUILD_MANIFEST")"
 {
     printf "{\n"
@@ -395,6 +414,7 @@ mkdir -p "$(dirname "$BUILD_MANIFEST")"
     printf '    "MLP1_PATCH_SET": '; json_string "$MLP1_PATCH_SET"; printf "\n"
     printf "  },\n"
     printf '  "toolchain_image": '; json_string "$TOOLCHAIN_IMAGE"; printf ",\n"
+    printf '  "ffmpeg_input_stamp_sha256": '; json_string "$ffmpeg_input_stamp_sha256"; printf ",\n"
     printf '  "output_binary": '; json_string "$OUTPUT_BIN_DIR/retroarch"; printf ",\n"
     printf '  "exceptions": [],\n'
     printf '  "verified": %s,' "$verified"; printf "\n"
