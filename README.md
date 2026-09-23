@@ -34,6 +34,21 @@ MLP1 vertical-slice build:
 ./smoke-mlp1-command.sh
 ```
 
+To build MLP1 recording support from the locked MPP and ffmpeg-rockchip
+revisions, then require RetroArch to use it:
+
+```sh
+./build-mlp1-ffmpeg.py
+MLP1_REQUIRE_FFMPEG=1 ./build-mlp1.sh
+```
+
+The host command clones the two sources into ignored `workdir/`, rejects a
+dirty or wrong-revision checkout, and reuses validated output when its source
+lock, toolchain image ID, build script, configure inputs, and output checksums
+still match `output/mlp1/ffmpeg/input-stamp.json`. The stamp also records the
+exact source URLs and commits. The first run needs network access to clone any
+missing source. Leaf's ZIP path calls this command before building RetroArch.
+
 MLP1 build with Jawaka's current patch set:
 
 ```sh
@@ -154,6 +169,7 @@ Outputs:
 - app bundle: `output/macos/RetroArch.app`
 - MLP1 binary: `output/mlp1/bin/retroarch`
 - MLP1 build manifest: `output/mlp1/build-manifest.json`
+- MLP1 FFmpeg input stamp: `output/mlp1/ffmpeg/input-stamp.json`
 - MLP1 GLSL shader bundle: `output/mlp1/shaders/`
 - Jawaka pak: `build/package/RetroArch.pak` (staged under `Apps/shared/`)
 
@@ -201,6 +217,7 @@ The upstream RetroArch source is **not** committed into this repo.
 | `MLP1_ENABLE_MALI_FBDEV` | `0` | Optional Mali fbdev build flag |
 | `MLP1_APPLY_COMMON_PATCHES` | `0` | Disabled guard against applying Spruce/common patches implicitly |
 | `MLP1_PATCH_SET` | empty | Comma-separated explicit patch set |
+| `MLP1_REQUIRE_FFMPEG` | `0` | Fail when the stamped FFmpeg output is missing; Leaf releases set this to `1` |
 | `JOBS` | container CPU count | Parallel make jobs |
 
 Supported `MLP1_PATCH_SET` entries:
