@@ -227,6 +227,10 @@ Supported `MLP1_PATCH_SET` entries:
 | `portrait-rotation` | rotate RetroArch's logical landscape output for the MLP1 portrait panel |
 | `command-menu` | add focused UDP command-menu commands for Jawaka |
 | `jawaka-load-content` | add Jawaka's load-content command path for resident/same-core switching |
+| `controller-bindings` | add `input_bind_controller_only`, which labels bindings with the controller's own button names |
+| `record-scale-clamp` | clamp the recording scale factor to the core's real geometry |
+| `record-indicator` | draw a pulsing dot while a recording is running |
+| `wayland-swap-interval` | honor swap intervals above 1 on SDL/Wayland by preserving the back buffer and swapping once per refresh; gives ~60 fps content even pacing at 120 Hz. Check: `make wayland-swap-interval-patch-test` |
 
 ## Notes
 
@@ -241,7 +245,7 @@ Supported `MLP1_PATCH_SET` entries:
 - The MLP1 lane intentionally starts from a clean upstream RetroArch checkout
   with `--enable-networking` and `--enable-command`. Spruce/common patches are
   not applied implicitly; use `MLP1_PATCH_SET` with explicit patch names.
-- Leaf's default MLP1 runtime build uses
-  `portrait-rotation,command-menu,jawaka-load-content`.
+- Leaf's default MLP1 runtime build uses the set in
+  `../Leaf/config/mlp1-retroarch-patch-set.txt`.
 - The build script reverses applied patches before exiting so
   `workdir/src/RetroArch` stays reusable for later clean or patched builds.
