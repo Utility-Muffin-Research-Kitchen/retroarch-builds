@@ -53,6 +53,7 @@ PATCH_PATHS = {
     "controller-bindings": "mlp1/0003-controller-only-bindings-ui.patch",
     "record-scale-clamp": "mlp1/0005-record-scale-clamp.patch",
     "record-indicator": "mlp1/0006-recording-indicator.patch",
+    "wayland-swap-interval": "mlp1/0007-wayland-swap-interval.patch",
 }
 
 entries = [name for name in patch_set.split(",") if name]
