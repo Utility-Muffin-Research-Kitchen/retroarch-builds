@@ -34,12 +34,14 @@ ln -sf "$TC/bin/${CROSS}ar" "$TC/bin/ar" 2>/dev/null || true
 echo "================ 1/3  MPP (cmake, shared) ================"
 cd "$SRC_MPP"
 rm -rf build/cross; mkdir -p build/cross; cd build/cross
-cmake ../.. \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-  -DCMAKE_C_COMPILER="${CROSS}gcc" -DCMAKE_CXX_COMPILER="${CROSS}g++" \
-  -DCMAKE_INSTALL_PREFIX="$SYSROOT/usr" -DCMAKE_INSTALL_LIBDIR=lib \
-  -DBUILD_TEST=OFF -DBUILD_SHARED_LIBS=ON >/tmp/mpp_cmake.log 2>&1 \
+cmake_args=(
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
+  -DCMAKE_C_COMPILER="${CROSS}gcc" -DCMAKE_CXX_COMPILER="${CROSS}g++"
+  -DCMAKE_INSTALL_PREFIX="$SYSROOT/usr" -DCMAKE_INSTALL_LIBDIR=lib
+  -DBUILD_TEST=OFF -DBUILD_SHARED_LIBS=ON
+)
+cmake ../.. "${cmake_args[@]}" >/tmp/mpp_cmake.log 2>&1 \
   || { tail -30 /tmp/mpp_cmake.log; exit 1; }
 make -j"$NPROC" >/tmp/mpp_make.log 2>&1 || { tail -40 /tmp/mpp_make.log; exit 1; }
 make install >/tmp/mpp_install.log 2>&1 || { tail -20 /tmp/mpp_install.log; exit 1; }
@@ -58,19 +60,20 @@ make distclean >/dev/null 2>&1 || true
 # --pkg-config=pkg-config is required: ffmpeg otherwise looks for the
 # cross-prefixed name, fails to find it, falls back to `false`, and reports
 # "libdrm not found" with no other explanation.
-./configure \
-  --prefix="$OUT" \
-  --enable-cross-compile --arch=aarch64 --target-os=linux \
-  --cross-prefix="$CROSS" --sysroot="$SYSROOT" \
-  --pkg-config=pkg-config \
-  --enable-gpl --enable-version3 \
-  --enable-libdrm --enable-rkmpp \
-  --enable-shared --disable-static \
-  --disable-ffplay --disable-ffprobe --disable-doc --disable-htmlpages \
-  --disable-manpages --disable-txtpages \
-  --disable-sdl2 --disable-alsa \
-  --disable-debug \
-  >/tmp/ff_configure.log 2>&1 \
+configure_args=(
+  --prefix="$OUT"
+  --enable-cross-compile --arch=aarch64 --target-os=linux
+  --cross-prefix="$CROSS" --sysroot="$SYSROOT"
+  --pkg-config=pkg-config
+  --enable-gpl --enable-version3
+  --enable-libdrm --enable-rkmpp
+  --enable-shared --disable-static
+  --disable-ffplay --disable-ffprobe --disable-doc --disable-htmlpages
+  --disable-manpages --disable-txtpages
+  --disable-sdl2 --disable-alsa
+  --disable-debug
+)
+./configure "${configure_args[@]}" >/tmp/ff_configure.log 2>&1 \
   || { echo "--- configure FAILED ---"; tail -40 /tmp/ff_configure.log; \
        echo "--- config.log tail ---"; tail -30 ffbuild/config.log 2>/dev/null; exit 1; }
 
@@ -177,4 +180,10 @@ echo "--- h264_rkmpp present in libavcodec ---"
 ${CROSS}strings "$OUT"/lib/libavcodec.so 2>/dev/null | grep -x "h264_rkmpp" \
   || strings "$OUT"/lib/libavcodec.so 2>/dev/null | grep -x "h264_rkmpp" \
   || { echo "  MISSING - the encoder did not build in"; exit 1; }
+{
+    printf 'mpp_cmake=%s\n' "${cmake_args[@]}"
+    printf 'ffmpeg_configure=%s\n' "${configure_args[@]}"
+    printf 'PKG_CONFIG_SYSROOT_DIR=%s\n' "$PKG_CONFIG_SYSROOT_DIR"
+    printf 'PKG_CONFIG_LIBDIR=%s\n' "$PKG_CONFIG_LIBDIR"
+} >"$OUT/configure-inputs.txt"
 echo "================ DONE -> $OUT ================"
