@@ -1,5 +1,5 @@
 diff --git a/command.c b/command.c
-index 791d510547..595d1cb761 100644
+index 791d510547..302af5e100 100644
 --- a/command.c
 +++ b/command.c
 @@ -43,7 +43,9 @@
@@ -21,7 +21,7 @@ index 791d510547..595d1cb761 100644
  #include "list_special.h"
  #include "paths.h"
  #include "retroarch.h"
-@@ -737,6 +741,505 @@ bool command_show_osd_msg(command_t *cmd, const char* arg)
+@@ -737,6 +741,565 @@ bool command_show_osd_msg(command_t *cmd, const char* arg)
      return true;
  }
  
@@ -524,10 +524,70 @@ index 791d510547..595d1cb761 100644
 +   cmd->replier(cmd, reply, strlen(reply));
 +   return true;
 +}
++
++/* UMRK boot resume: LOAD_STATE_SYNC <id> <slot>
++ * Reads the slot's state and applies it to the running core synchronously,
++ * then replies exactly once:
++ *   LOAD_STATE_SYNC <id> OK <bytes>
++ *   LOAD_STATE_SYNC <id> ERROR <code>
++ *   LOAD_STATE_SYNC - ERROR BAD_ARGS      (unparseable line or id)
++ * Unlike LOAD_STATE_SLOT there is no task, no undo buffer and no retry: the
++ * reply is the answer to whether this exact file is now the running state. */
++bool command_load_state_sync(command_t *cmd, const char *arg)
++{
++   char id[33]                      = "";
++   char state_path[PATH_MAX_LENGTH] = "";
++   char reply[128]                  = "";
++   long slot                        = 0;
++   char trailing                    = 0;
++   size_t loaded                    = 0;
++   const char *error                = NULL;
++   enum content_sync_load_result result;
++
++   /* %32s stops at 32 characters and would let the rest of a longer id
++    * parse as the slot, so measure the token first. */
++   if (  !arg
++       || strcspn(arg, " ") > 32
++       || sscanf(arg, "%32s %ld %c", id, &slot, &trailing) != 2
++       || !command_sync_request_id_valid(id))
++   {
++      strlcpy(reply, "LOAD_STATE_SYNC - ERROR BAD_ARGS", sizeof(reply));
++      cmd->replier(cmd, reply, strlen(reply));
++      return false;
++   }
++
++   if (slot < 0 || slot > 999)
++      error = "BAD_ARGS";
++   else if (!runloop_get_savestate_path(state_path, sizeof(state_path), (int)slot))
++      error = "PATH";
++
++   if (!error)
++   {
++      result = content_load_state_sync_file(state_path, &loaded);
++      if (result != CONTENT_SYNC_LOAD_OK)
++         error = content_sync_load_result_str(result);
++   }
++
++   if (error)
++   {
++      RARCH_WARN("[State] LOAD_STATE_SYNC %s failed: %s\n", id, error);
++      snprintf(reply, sizeof(reply), "LOAD_STATE_SYNC %s ERROR %s", id, error);
++      cmd->replier(cmd, reply, strlen(reply));
++      return false;
++   }
++
++   command_post_state_loaded();
++   RARCH_LOG("[State] LOAD_STATE_SYNC %s loaded: %llu bytes\n",
++         id, (unsigned long long)loaded);
++   snprintf(reply, sizeof(reply), "LOAD_STATE_SYNC %s OK %llu",
++         id, (unsigned long long)loaded);
++   cmd->replier(cmd, reply, strlen(reply));
++   return true;
++}
  
  bool command_load_state_slot(command_t *cmd, const char *arg)
  {
-@@ -1046,6 +1549,11 @@ bool command_get_status(command_t *cmd, const char* arg)
+@@ -1046,6 +1609,11 @@ bool command_get_status(command_t *cmd, const char* arg)
        core_info_get_current_core(&core_info);
  
        _len     = strlcpy(reply, "GET_STATUS ", sizeof(reply));
@@ -539,7 +599,7 @@ index 791d510547..595d1cb761 100644
        if (runloop_st->flags & RUNLOOP_FLAG_PAUSED)
           _len += strlcpy(reply + _len, "PAUSED", sizeof(reply) - _len);
        else
-@@ -1923,6 +2431,268 @@ void command_event_set_replay_garbage_collect(
+@@ -1923,6 +2491,268 @@ void command_event_set_replay_garbage_collect(
  }
  
  #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
@@ -809,10 +869,10 @@ index 791d510547..595d1cb761 100644
  {
     enum  rarch_shader_type type = video_shader_parse_type(arg);
 diff --git a/command.h b/command.h
-index 6fd256541b..28f96329c6 100644
+index 6fd256541b..cddfba86bf 100644
 --- a/command.h
 +++ b/command.h
-@@ -425,8 +425,32 @@ struct cmd_action_map
+@@ -425,8 +425,33 @@ struct cmd_action_map
  bool command_version(command_t *cmd, const char* arg);
  bool command_get_status(command_t *cmd, const char* arg);
  bool command_get_config_param(command_t *cmd, const char* arg);
@@ -832,6 +892,7 @@ index 6fd256541b..28f96329c6 100644
 +bool command_save_state_slot(command_t *cmd, const char *arg);
 +bool command_get_state_save_info(command_t *cmd, const char *arg);
 +bool command_save_state_sync(command_t *cmd, const char *arg);
++bool command_load_state_sync(command_t *cmd, const char *arg);
  bool command_load_state_slot(command_t *cmd, const char* arg);
 +#if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
 +bool command_jawaka_get_shader(command_t *cmd, const char *arg);
@@ -845,7 +906,7 @@ index 6fd256541b..28f96329c6 100644
  bool command_play_replay_slot(command_t *cmd, const char* arg);
  bool command_seek_replay(command_t *cmd, const char *arg);
  bool command_save_savefiles(command_t *cmd, const char* arg);
-@@ -442,10 +466,22 @@ bool command_load_core(command_t *cmd, const char* arg);
+@@ -442,10 +467,22 @@ bool command_load_core(command_t *cmd, const char* arg);
  static const struct cmd_action_map action_map[] = {
  #if defined(HAVE_CG) || defined(HAVE_GLSL) || defined(HAVE_SLANG) || defined(HAVE_HLSL)
     { "SET_SHADER",       command_set_shader,       "<shader path>" },
@@ -868,7 +929,7 @@ index 6fd256541b..28f96329c6 100644
     { "SHOW_MSG",         command_show_osd_msg,     "No argument" },
  #if defined(HAVE_CHEEVOS)
     /* These functions use achievement addresses and only work if a game with achievements is
-@@ -456,6 +492,21 @@ static const struct cmd_action_map action_map[] = {
+@@ -456,6 +493,25 @@ static const struct cmd_action_map action_map[] = {
     { "READ_CORE_MEMORY", command_read_memory,      "<address> <number of bytes>" },
     { "WRITE_CORE_MEMORY",command_write_memory,     "<address> <byte1> <byte2> ..." },
  
@@ -886,15 +947,19 @@ index 6fd256541b..28f96329c6 100644
 +   { "SAVE_STATE_SLOT",  command_save_state_slot,  "<slot number>" },
 +   { "GET_STATE_SAVE_INFO", command_get_state_save_info, "No argument" },
 +   { "SAVE_STATE_SYNC", command_save_state_sync, "<request id> <slot> <max bytes> <start by monotonic ms>" },
++   /* Ahead of LOAD_STATE_SLOT like SAVE_STATE_SYNC: lookup is by prefix and
++    * gives up at the first entry the line starts with, so the sync names
++    * stay out of the *_SLOT namespace and come first. */
++   { "LOAD_STATE_SYNC", command_load_state_sync, "<request id> <slot>" },
 +
     { "LOAD_STATE_SLOT",command_load_state_slot, "<slot number>"},
     { "PLAY_REPLAY_SLOT",command_play_replay_slot, "<slot number>"},
     { "SEEK_REPLAY",command_seek_replay, "<frame number>"},
 diff --git a/content.h b/content.h
-index 612bc4e185..5726cd79b3 100644
+index 612bc4e185..ea85b63ae7 100644
 --- a/content.h
 +++ b/content.h
-@@ -57,6 +57,33 @@ bool content_save_state(const char *path, bool save_to_disk);
+@@ -57,6 +57,56 @@ bool content_save_state(const char *path, bool save_to_disk);
  /* Save an automatic savestate to disk. */
  bool content_auto_save_state(const char *path);
  
@@ -924,6 +989,29 @@ index 612bc4e185..5726cd79b3 100644
 +      uint64_t max_bytes, int64_t start_by_ms, size_t *out_len);
 +
 +const char *content_sync_save_result_str(enum content_sync_save_result result);
++
++/* Result of content_load_state_sync_file(). */
++enum content_sync_load_result
++{
++   CONTENT_SYNC_LOAD_OK = 0,
++   CONTENT_SYNC_LOAD_UNSUPPORTED,
++   CONTENT_SYNC_LOAD_HARDCORE,
++   CONTENT_SYNC_LOAD_BUSY,
++   CONTENT_SYNC_LOAD_OPEN,
++   CONTENT_SYNC_LOAD_READ,
++   CONTENT_SYNC_LOAD_TOO_LARGE,
++   CONTENT_SYNC_LOAD_UNSERIALIZE
++};
++
++/* UMRK: read the uncompressed state at @path and apply it to the running
++ * core, blocking. No undo buffer, no SRAM preservation, no task. Fails
++ * UNSERIALIZE for a compressed or truncated file and for any state the core
++ * rejects; on failure the core may hold a partially applied state, and the
++ * caller is expected to quit rather than play on. */
++enum content_sync_load_result content_load_state_sync_file(const char *path,
++      size_t *out_len);
++
++const char *content_sync_load_result_str(enum content_sync_load_result result);
 +
  /* Check a ram state write to disk. */
  bool content_ram_state_pending(void);
@@ -968,10 +1056,10 @@ index e9c72b72dc..e1bbeaa438 100644
  
  bool runloop_get_savestate_path(char *path, size_t len, int slot);
 diff --git a/tasks/task_save.c b/tasks/task_save.c
-index 343a7e288b..5591326ca1 100644
+index 343a7e288b..5cbc61dacd 100644
 --- a/tasks/task_save.c
 +++ b/tasks/task_save.c
-@@ -13,8 +13,11 @@
+@@ -13,8 +13,12 @@
   *  You should have received a copy of the GNU General Public License along with RetroArch.
   *  If not, see <http://www.gnu.org/licenses/>.
   */
@@ -980,10 +1068,11 @@ index 343a7e288b..5591326ca1 100644
  #include <stdint.h>
  #include <stdlib.h>
 +#include <unistd.h>
++#include <sys/stat.h>
  #include <sys/types.h>
  #include <string.h>
  #include <time.h>
-@@ -1389,6 +1392,130 @@ bool content_auto_save_state(const char *path)
+@@ -1389,6 +1393,283 @@ bool content_auto_save_state(const char *path)
     return true;
  }
  
@@ -1109,6 +1198,159 @@ index 343a7e288b..5591326ca1 100644
 +   if (out_len)
 +      *out_len = _len;
 +   return CONTENT_SYNC_SAVE_OK;
++}
++
++/* Room for the optional achievement and replay blocks of a RASTATE file
++ * beyond what the running core serializes. */
++#define CONTENT_SYNC_LOAD_HEADROOM (16u * 1024u * 1024u)
++
++const char *content_sync_load_result_str(enum content_sync_load_result result)
++{
++   switch (result)
++   {
++      case CONTENT_SYNC_LOAD_OK:          return "OK";
++      case CONTENT_SYNC_LOAD_UNSUPPORTED: return "UNSUPPORTED";
++      case CONTENT_SYNC_LOAD_HARDCORE:    return "HARDCORE";
++      case CONTENT_SYNC_LOAD_BUSY:        return "BUSY";
++      case CONTENT_SYNC_LOAD_OPEN:        return "OPEN";
++      case CONTENT_SYNC_LOAD_READ:        return "READ";
++      case CONTENT_SYNC_LOAD_TOO_LARGE:   return "TOO_LARGE";
++      case CONTENT_SYNC_LOAD_UNSERIALIZE: return "UNSERIALIZE";
++   }
++   return "UNKNOWN";
++}
++
++/* Walks a RASTATE1 buffer the way content_load_rastate1() does, but checks
++ * every block against the buffer first: that parser trusts the block sizes,
++ * so a truncated file would hand the core a size that runs past the read.
++ * Requires a MEM block and the END block the writer always appends, which
++ * is what turns any truncation into a refusal. */
++static bool content_sync_load_rastate_bounded(const unsigned char *data,
++      size_t len)
++{
++   size_t pos    = 8;
++   bool seen_mem = false;
++
++   if (len < 8 || data[7] != RASTATE_VERSION)
++      return false;
++
++   while (len - pos >= 8)
++   {
++      const unsigned char *marker = data + pos;
++      size_t block_size           = (size_t)marker[4]
++         | ((size_t)marker[5] << 8)
++         | ((size_t)marker[6] << 16)
++         | ((size_t)marker[7] << 24);
++
++      pos += 8;
++      if (memcmp(marker, RASTATE_END_BLOCK, 4) == 0)
++         return seen_mem;
++      if (block_size > len - pos || CONTENT_ALIGN_SIZE(block_size) > len - pos)
++         return false;
++      if (memcmp(marker, RASTATE_MEM_BLOCK, 4) == 0)
++      {
++         if (block_size == 0)
++            return false;
++         seen_mem = true;
++      }
++      pos += CONTENT_ALIGN_SIZE(block_size);
++   }
++   return false;
++}
++
++enum content_sync_load_result content_load_state_sync_file(const char *path,
++      size_t *out_len)
++{
++   struct stat st;
++   size_t serialized_size;
++   size_t _len;
++   size_t done;
++   int fd;
++   unsigned char *data = NULL;
++
++   if (out_len)
++      *out_len = 0;
++   if (!path || !*path)
++      return CONTENT_SYNC_LOAD_UNSUPPORTED;
++   if (   !core_info_current_supports_savestate()
++       || (serialized_size = content_get_serialized_size()) == 0)
++      return CONTENT_SYNC_LOAD_UNSUPPORTED;
++#ifdef HAVE_CHEEVOS
++   if (rcheevos_hardcore_active())
++      return CONTENT_SYNC_LOAD_HARDCORE;
++#endif
++   if (content_save_state_in_progress(NULL) || content_load_state_in_progress(NULL))
++      return CONTENT_SYNC_LOAD_BUSY;
++
++   fd = open(path, O_RDONLY | O_CLOEXEC);
++   if (fd < 0)
++   {
++      RARCH_ERR("[State] Sync load could not open \"%s\": %s\n",
++            path, strerror(errno));
++      return CONTENT_SYNC_LOAD_OPEN;
++   }
++   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
++   {
++      RARCH_ERR("[State] Sync load \"%s\" is not a regular file.\n", path);
++      close(fd);
++      return CONTENT_SYNC_LOAD_OPEN;
++   }
++   /* The file can only exceed what this core writes by the optional
++    * achievement and replay blocks. Anything past that headroom is not a
++    * state for this session and is refused before allocating for it. */
++   if (   st.st_size < 0
++       || (uint64_t)st.st_size > (uint64_t)serialized_size
++            + CONTENT_SYNC_LOAD_HEADROOM)
++   {
++      close(fd);
++      return CONTENT_SYNC_LOAD_TOO_LARGE;
++   }
++   _len = (size_t)st.st_size;
++   if (_len < 8)
++   {
++      close(fd);
++      return CONTENT_SYNC_LOAD_UNSERIALIZE;
++   }
++   if (!(data = (unsigned char*)malloc(_len)))
++   {
++      close(fd);
++      return CONTENT_SYNC_LOAD_READ;
++   }
++
++   for (done = 0; done < _len; )
++   {
++      ssize_t n = read(fd, data + done, _len - done);
++      if (n < 0 && errno == EINTR)
++         continue;
++      if (n <= 0)
++      {
++         RARCH_ERR("[State] Sync load read failed for \"%s\": %s\n",
++               path, n < 0 ? strerror(errno) : "short read");
++         close(fd);
++         free(data);
++         return CONTENT_SYNC_LOAD_READ;
++      }
++      done += (size_t)n;
++   }
++   close(fd);
++
++   /* Uncompressed only, like the save: a compressed state is not a state
++    * this path can apply. Raw core data without a RASTATE header goes
++    * straight to the core, which checks the size itself. */
++   if (   memcmp(data, "#RZIPv", 6) == 0
++       || (   memcmp(data, "RASTATE", 7) == 0
++           && !content_sync_load_rastate_bounded(data, _len))
++       || !content_deserialize_state(data, _len))
++   {
++      RARCH_ERR("[State] Sync load could not apply \"%s\".\n", path);
++      free(data);
++      return CONTENT_SYNC_LOAD_UNSERIALIZE;
++   }
++   free(data);
++
++   if (out_len)
++      *out_len = _len;
++   return CONTENT_SYNC_LOAD_OK;
 +}
 +
  /**
