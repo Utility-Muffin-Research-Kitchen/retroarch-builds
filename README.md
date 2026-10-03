@@ -56,6 +56,13 @@ MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content ./build-mlp1.s
 ./smoke-mlp1-command.sh
 ```
 
+With the `command-menu` patch, the command smoke also runs
+`./smoke-mlp1-load-state-sync.sh`: the MLP1 binary runs inside the toolchain
+image against a small test core (`tests/load-state-sync/`) and answers
+`LOAD_STATE_SYNC` for a good, missing, truncated, compressed, oversized and
+core-rejected slot. The image is arm64, so this is native on an Apple Silicon
+host.
+
 Jawaka app tile packaging:
 
 ```sh

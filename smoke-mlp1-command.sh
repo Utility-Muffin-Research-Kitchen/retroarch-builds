@@ -22,7 +22,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-python3 - "$BUILD_MANIFEST" "$BINARY" <<'PY'
+manifest_report="$(python3 - "$BUILD_MANIFEST" "$BINARY" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -118,6 +118,23 @@ if "command-menu" in entries:
         )
         sys.exit(1)
     print("manifest_ok: power-hold sync save commands present")
+
+    # Jawaka's boot resume accepts only a LOAD_STATE_SYNC OK as proof that the
+    # recorded state is running; without the command it never boot-launches.
+    load_required = [
+        b"LOAD_STATE_SYNC %s OK %llu",
+        b"LOAD_STATE_SYNC %s ERROR %s",
+        b"LOAD_STATE_SYNC - ERROR BAD_ARGS",
+    ]
+    load_absent = [token.decode() for token in load_required if token not in blob]
+    if load_absent:
+        print(
+            "binary claims command-menu but is missing the boot-resume sync load "
+            f"replies: {', '.join(load_absent)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print("manifest_ok: boot-resume sync load command present")
     print(
         "device_required: launch this binary on MLP1 and send "
         "GET_INFO, GET_STATE_SLOT, SET_STATE_SLOT, SAVE_STATE_SLOT, "
@@ -134,7 +151,20 @@ if "command-menu" in entries:
         "device_required: also exercise GET_STATE_SAVE_INFO and SAVE_STATE_SYNC "
         "(TMP_READY, LATE, TOO_LARGE, BAD_ARGS, existing temporary name)"
     )
+    print(
+        "device_required: also exercise LOAD_STATE_SYNC on a qualified game core "
+        "(OK after a power-hold save, missing slot 99, truncated slot 99)"
+    )
+    print("run_load_state_sync_smoke")
 else:
     print("manifest_ok: clean upstream command build has no MLP1 patches")
     print("device_required: launch this binary on MLP1 and send GET_STATUS, PAUSE_TOGGLE, MENU_TOGGLE, QUIT over the RetroArch command interface")
 PY
+)"
+grep -v '^run_load_state_sync_smoke$' <<< "$manifest_report"
+
+# A command-menu build also has to apply a state through LOAD_STATE_SYNC, not
+# just carry its strings: run the binary against a test core.
+if grep -qx 'run_load_state_sync_smoke' <<< "$manifest_report"; then
+    BINARY="$BINARY" "$SCRIPT_DIR/smoke-mlp1-load-state-sync.sh"
+fi

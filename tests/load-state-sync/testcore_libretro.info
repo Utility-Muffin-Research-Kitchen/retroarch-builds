@@ -1,0 +1,10 @@
+# Core info for the LOAD_STATE_SYNC smoke's test core. Without one, upstream
+# GET_STATUS dereferences an empty system_id; with one, the savestate support
+# check reads a real support level as it does on the device.
+display_name = "Load State Sync Test"
+corename = "LoadStateSyncTest"
+systemname = "Test"
+systemid = "test"
+supported_extensions = "bin"
+savestate = "true"
+savestate_features = "serialized"
