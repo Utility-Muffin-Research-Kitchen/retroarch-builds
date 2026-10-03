@@ -101,6 +101,23 @@ if "command-menu" in entries:
         print("binary is missing upstream SET_SHADER", file=sys.stderr)
         sys.exit(1)
     print("manifest_ok: namespaced shader commands and upstream SET_SHADER present")
+
+    # Jawaka's power-hold save probes GET_STATE_SAVE_INFO and relies on the
+    # TMP_READY reply; a command-menu build without them must not ship.
+    sync_required = [
+        b"GET_STATE_SAVE_INFO 1 %llu %d",
+        b"SAVE_STATE_SYNC %s TMP_READY %llu %s",
+        b"SAVE_STATE_SYNC %s ERROR %s",
+    ]
+    sync_absent = [token.decode() for token in sync_required if token not in blob]
+    if sync_absent:
+        print(
+            "binary claims command-menu but is missing the power-hold sync save "
+            f"replies: {', '.join(sync_absent)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print("manifest_ok: power-hold sync save commands present")
     print(
         "device_required: launch this binary on MLP1 and send "
         "GET_INFO, GET_STATE_SLOT, SET_STATE_SLOT, SAVE_STATE_SLOT, "
@@ -112,6 +129,10 @@ if "command-menu" in entries:
         "(valid, missing, unsupported and unlinkable presets), "
         "JAWAKA_CLEAR_SHADER, and JAWAKA_SAVE/REMOVE_SHADER_PRESET for each of "
         "GAME|PARENT|CORE|GLOBAL plus one unknown scope"
+    )
+    print(
+        "device_required: also exercise GET_STATE_SAVE_INFO and SAVE_STATE_SYNC "
+        "(TMP_READY, LATE, TOO_LARGE, BAD_ARGS, existing temporary name)"
     )
 else:
     print("manifest_ok: clean upstream command build has no MLP1 patches")
