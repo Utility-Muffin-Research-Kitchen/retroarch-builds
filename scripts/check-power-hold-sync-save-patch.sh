@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Focused wiring check for Jawaka's power-hold save: the synchronous
-# temporary-file save and its capability probe in the MLP1 command patch.
+# Focused wiring check for Jawaka's power-hold save and boot resume: the
+# synchronous temporary-file save, its capability probe, and the synchronous
+# load in the MLP1 command patch.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,6 +50,43 @@ require 'return CONTENT_SYNC_SAVE_COMPRESSED;' \
     "sync save no longer refuses compressed states"
 forbid 'take_screenshot' \
     "the command patch now captures thumbnails"
+
+# LOAD_STATE_SYNC: Jawaka's boot resume accepts only this reply as proof that
+# the recorded state is the running state.
+require '{ "LOAD_STATE_SYNC", command_load_state_sync,' \
+    "LOAD_STATE_SYNC is not registered"
+forbid '"LOAD_STATE_SLOT_SYNC"' \
+    "a LOAD_STATE_SLOT_* name is shadowed by the LOAD_STATE_SLOT prefix match"
+if ! awk '/"LOAD_STATE_SYNC", command_load_state_sync,/ { seen = 1 }
+          /"LOAD_STATE_SLOT",command_load_state_slot,/ { exit !seen }
+          END { if (!seen) exit 1 }' "$PATCH"; then
+    fail "LOAD_STATE_SYNC must be listed before LOAD_STATE_SLOT"
+fi
+require '"LOAD_STATE_SYNC %s OK %llu"' \
+    "sync load no longer replies OK with id and bytes"
+require '"LOAD_STATE_SYNC %s ERROR %s"' \
+    "sync load no longer replies ERROR with id and code"
+require '"LOAD_STATE_SYNC - ERROR BAD_ARGS"' \
+    "sync load no longer rejects an unparseable line without echoing it"
+require 'strcspn(arg, " ") > 32' \
+    "sync load no longer bounds the request id before sscanf"
+for code in UNSUPPORTED HARDCORE BUSY OPEN READ TOO_LARGE UNSERIALIZE; do
+    require "case CONTENT_SYNC_LOAD_${code}: " \
+        "sync load no longer reports $code"
+done
+require 'return CONTENT_SYNC_LOAD_HARDCORE;' \
+    "sync load no longer refuses while hardcore is active"
+require 'memcmp(data, "#RZIPv", 6) == 0' \
+    "sync load no longer refuses a compressed state"
+require 'content_sync_load_rastate_bounded(data, _len)' \
+    "sync load no longer bounds RASTATE blocks before the core sees them"
+require 'CONTENT_SYNC_LOAD_HEADROOM' \
+    "sync load no longer bounds the file size before reading it"
+# One reply, no task: a queued load would answer before the state applied.
+if awk '/^\+bool command_load_state_sync\(/,/^\+}$/' "$PATCH" |
+        grep -Eq 'content_load_state\(|task_push'; then
+    fail "LOAD_STATE_SYNC must apply the state itself, not queue a load task"
+fi
 # The definition's parameter list ends in ")" where the header prototype ends in ");".
 if awk '/uint64_t max_bytes, int64_t start_by_ms, size_t \*out_len\)$/,/^\+}$/' "$PATCH" |
         grep -Eq 'rename|filestream_rename'; then
