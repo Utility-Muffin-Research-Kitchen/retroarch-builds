@@ -9,8 +9,12 @@ fi
 
 TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:local}"
 TOOLCHAIN_REPO="${TOOLCHAIN_REPO:-$DEFAULT_TOOLCHAIN_REPO}"
-RETROARCH_VERSION="${RETROARCH_VERSION:-v1.22.2}"
-RETROARCH_UPSTREAM_URL="${RETROARCH_UPSTREAM_URL:-https://github.com/libretro/RetroArch.git}"
+# The manifest records these defaults beside the values actually built, so
+# Leaf can refuse to reuse a binary built from an overridden source.
+RETROARCH_DEFAULT_VERSION="v1.22.2"
+RETROARCH_DEFAULT_UPSTREAM_URL="https://github.com/libretro/RetroArch.git"
+RETROARCH_VERSION="${RETROARCH_VERSION:-$RETROARCH_DEFAULT_VERSION}"
+RETROARCH_UPSTREAM_URL="${RETROARCH_UPSTREAM_URL:-$RETROARCH_DEFAULT_UPSTREAM_URL}"
 RETROARCH_SRC_DIR="${RETROARCH_SRC_DIR:-$REPO_ROOT/workdir/src/RetroArch}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/output/mlp1}"
 OUTPUT_BIN_DIR="${OUTPUT_BIN_DIR:-$OUTPUT_DIR/bin}"
@@ -77,6 +81,13 @@ else
     UMRK_MLP1_PROFILE_CXXFLAGS="-O2 -mcpu=cortex-a55 -mtune=cortex-a55 -ffunction-sections -fdata-sections -DNDEBUG"
     UMRK_MLP1_PROFILE_LDFLAGS="-Wl,--gc-sections"
 fi
+
+# An edit to either script can change the binary without touching a patch, so
+# Leaf treats a mismatch here as a stale build.
+build_inputs_sha256=()
+for build_input in build-mlp1.sh fetch-retroarch.sh; do
+    build_inputs_sha256+=("$build_input" "$(sha256sum "$REPO_ROOT/$build_input" | cut -d' ' -f1)")
+done
 
 "$REPO_ROOT/fetch-retroarch.sh"
 
@@ -159,6 +170,7 @@ if [[ "$apply_common_patches" == "true" ]]; then
 fi
 
 patches_applied=()
+patches_sha256=()
 patches_to_unapply=()
 
 cleanup_applied_patches() {
@@ -233,6 +245,9 @@ apply_named_patch() {
     git apply --check "$patch_path"
     git apply "$patch_path"
     patches_applied+=("$patch_label")
+    # Patches are edited in place, so the name alone does not identify what
+    # was applied. Leaf compares these against the checkout before reuse.
+    patches_sha256+=("$patch_label" "$(sha256sum "$patch_path" | cut -d' ' -f1)")
     patches_to_unapply+=("$patch_path")
 }
 
@@ -391,7 +406,26 @@ json_array() {
     printf "]"
 }
 
+# Takes alternating keys and values.
+json_object() {
+    local first=1
+
+    printf "{"
+    while [[ "$#" -ge 2 ]]; do
+        if [[ "$first" -eq 0 ]]; then
+            printf ", "
+        fi
+        json_string "$1"
+        printf ": "
+        json_string "$2"
+        first=0
+        shift 2
+    done
+    printf "}"
+}
+
 commit="$(git -C "$RETROARCH_SRC_DIR" rev-parse HEAD)"
+output_binary_sha256="$(sha256sum "$OUTPUT_BIN_DIR/retroarch" | cut -d' ' -f1)"
 ffmpeg_input_stamp_sha256=""
 if [[ "$ffmpeg_flag" == "--enable-ffmpeg" && -f "$MLP1_FFMPEG_INPUT_STAMP" ]]; then
     ffmpeg_input_stamp_sha256="$(sha256sum "$MLP1_FFMPEG_INPUT_STAMP" | cut -d' ' -f1)"
@@ -404,6 +438,10 @@ mkdir -p "$(dirname "$BUILD_MANIFEST")"
     printf '  "retroarch_upstream_url": '; json_string "$RETROARCH_UPSTREAM_URL"; printf ",\n"
     printf '  "source_dir": '; json_string "$RETROARCH_SRC_DIR"; printf ",\n"
     printf '  "commit": '; json_string "$commit"; printf ",\n"
+    printf '  "source_defaults": '
+    json_object retroarch_version "$RETROARCH_DEFAULT_VERSION" \
+        retroarch_upstream_url "$RETROARCH_DEFAULT_UPSTREAM_URL"
+    printf ",\n"
     printf '  "target_soc": '; json_string "$UMRK_MLP1_TARGET_SOC"; printf ",\n"
     printf '  "target_cpu": '; json_string "$UMRK_MLP1_TARGET_CPU"; printf ",\n"
     printf '  "build_profile": '; json_string "$MLP1_BUILD_PROFILE"; printf ",\n"
@@ -412,14 +450,17 @@ mkdir -p "$(dirname "$BUILD_MANIFEST")"
     printf '  "ldflags": '; json_string "$LDFLAGS"; printf ",\n"
     printf '  "configure_flags": '; json_array "${configure_flags[@]}"; printf ",\n"
     printf '  "patches_applied": '; json_array ${patches_applied[@]+"${patches_applied[@]}"}; printf ",\n"
+    printf '  "patches_sha256": '; json_object ${patches_sha256[@]+"${patches_sha256[@]}"}; printf ",\n"
     printf "  \"patch_controls\": {\n"
     printf '    "MLP1_APPLY_COMMON_PATCHES": '; json_string "$MLP1_APPLY_COMMON_PATCHES"; printf ",\n"
     printf '    "MLP1_ENABLE_MALI_FBDEV": '; json_string "$MLP1_ENABLE_MALI_FBDEV"; printf ",\n"
     printf '    "MLP1_PATCH_SET": '; json_string "$MLP1_PATCH_SET"; printf "\n"
     printf "  },\n"
     printf '  "toolchain_image": '; json_string "$TOOLCHAIN_IMAGE"; printf ",\n"
+    printf '  "build_inputs_sha256": '; json_object "${build_inputs_sha256[@]}"; printf ",\n"
     printf '  "ffmpeg_input_stamp_sha256": '; json_string "$ffmpeg_input_stamp_sha256"; printf ",\n"
     printf '  "output_binary": '; json_string "$OUTPUT_BIN_DIR/retroarch"; printf ",\n"
+    printf '  "output_binary_sha256": '; json_string "$output_binary_sha256"; printf ",\n"
     printf '  "exceptions": [],\n'
     printf '  "verified": %s,' "$verified"; printf "\n"
     printf '  "verification": '; json_string "$verification_status"; printf "\n"

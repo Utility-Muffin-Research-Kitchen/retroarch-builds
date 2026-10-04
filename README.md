@@ -56,6 +56,14 @@ MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content ./build-mlp1.s
 ./smoke-mlp1-command.sh
 ```
 
+The build manifest records a SHA-256 for every applied patch
+(`patches_sha256`), for `build-mlp1.sh` and `fetch-retroarch.sh`
+(`build_inputs_sha256`) and for the finished binary (`output_binary_sha256`),
+plus the RetroArch tag and remote the script pins (`source_defaults`). Leaf
+checks them against this checkout before it reuses `output/mlp1/bin/retroarch`.
+If you edit a patch in place, change either script, or build with an overridden
+`RETROARCH_VERSION`, Leaf rebuilds instead of shipping the old binary.
+
 With the `command-menu` patch, the command smoke also runs
 `./smoke-mlp1-load-state-sync.sh`: the MLP1 binary runs inside the toolchain
 image against a small test core (`tests/load-state-sync/`) and answers
