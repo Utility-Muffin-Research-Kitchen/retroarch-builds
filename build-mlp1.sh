@@ -226,12 +226,16 @@ apply_named_patch() {
             patch_path="$REPO_ROOT/patches/mlp1/0007-wayland-swap-interval.patch"
             patch_label="mlp1/$(basename "$patch_path")"
             ;;
+        sdl-gl-attributes)
+            patch_path="$REPO_ROOT/patches/mlp1/0008-sdl-gl-apply-attributes-after-video-init.patch"
+            patch_label="mlp1/$(basename "$patch_path")"
+            ;;
         "")
             return 0
             ;;
         *)
             echo "unknown MLP1 patch set entry: $name" >&2
-            echo "known entries: portrait-rotation, command-menu, jawaka-load-content, controller-bindings, record-scale-clamp, record-indicator, wayland-swap-interval" >&2
+            echo "known entries: portrait-rotation, command-menu, jawaka-load-content, controller-bindings, record-scale-clamp, record-indicator, wayland-swap-interval, sdl-gl-attributes" >&2
             exit 1
             ;;
     esac

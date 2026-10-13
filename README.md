@@ -246,6 +246,7 @@ Supported `MLP1_PATCH_SET` entries:
 | `record-scale-clamp` | clamp the recording scale factor to the core's real geometry |
 | `record-indicator` | draw a pulsing dot while a recording is running |
 | `wayland-swap-interval` | honor swap intervals above 1 on SDL/Wayland by preserving the back buffer and swapping once per refresh; gives ~60 fps content even pacing at 120 Hz. Check: `make wayland-swap-interval-patch-test` |
+| `sdl-gl-attributes` | store the GL context version and profile in `bind_api` and apply them again after SDL's video subsystem starts, since SDL resets them there; without it a Debian-style SDL that defaults to desktop GL gets the wrong context. Apply it after `wayland-swap-interval`. Check: `make sdl-gl-attributes-patch-test` |
 
 ## Notes
 
