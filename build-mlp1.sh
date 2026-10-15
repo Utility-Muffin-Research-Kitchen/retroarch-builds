@@ -82,11 +82,22 @@ else
     UMRK_MLP1_PROFILE_LDFLAGS="-Wl,--gc-sections"
 fi
 
-# An edit to either script can change the binary without touching a patch, so
-# Leaf treats a mismatch here as a stale build.
+. "$REPO_ROOT/build-mlp1-sdl2.sh"
+
+# An edit to any of these can change the binary or the SDL beside it without
+# touching a RetroArch patch, so Leaf treats a mismatch here as a stale build.
 build_inputs_sha256=()
-for build_input in build-mlp1.sh fetch-retroarch.sh; do
+for build_input in build-mlp1.sh fetch-retroarch.sh build-mlp1-sdl2.sh \
+        "${MLP1_SDL2_PATCHES[@]/#/patches/}"; do
     build_inputs_sha256+=("$build_input" "$(sha256sum "$REPO_ROOT/$build_input" | cut -d' ' -f1)")
+done
+
+# RetroArch reaches this through its RUNPATH; see build-mlp1-sdl2.sh.
+SDL2_OUTPUT_DIR="$OUTPUT_DIR/lib/retroarch"
+mlp1_sdl2_build "$SDL2_OUTPUT_DIR"
+sdl2_patches_sha256=()
+for sdl2_patch in "${MLP1_SDL2_PATCHES[@]}"; do
+    sdl2_patches_sha256+=("$sdl2_patch" "$(sha256sum "$REPO_ROOT/patches/$sdl2_patch" | cut -d' ' -f1)")
 done
 
 "$REPO_ROOT/fetch-retroarch.sh"
@@ -358,17 +369,35 @@ mkdir -p "$OUTPUT_BIN_DIR"
 cp -f retroarch "$OUTPUT_BIN_DIR/retroarch"
 "${STRIP:-aarch64-buildroot-linux-gnu-strip}" -s "$OUTPUT_BIN_DIR/retroarch"
 
+# $ORIGIN resolves to the directory holding the binary, so on the SD card these
+# are .system/leaf/platforms/mlp1/lib/retroarch and lib/ffmpeg. RetroArch finds
+# its patched SDL and our FFmpeg there without shadowing the rootfs SDL that the
+# launcher and standalones use, or the stock libav* that Kodi and friends use.
+# RetroArch still links against the sysroot's SDL 2.28.5: same version, same
+# SONAME, so the loader takes whichever copy the runpath finds first.
+retroarch_runpath='$ORIGIN/../lib/retroarch'
 if [[ "$ffmpeg_flag" == "--enable-ffmpeg" ]]; then
-    # $ORIGIN resolves to the directory holding the binary, so this finds our
-    # FFmpeg at .system/leaf/platforms/mlp1/lib/ffmpeg on the SD card without
-    # shadowing the stock libav* that Kodi and friends use.
-    patchelf --set-rpath '$ORIGIN/../lib/ffmpeg' "$OUTPUT_BIN_DIR/retroarch"
-    rpath_actual="$(patchelf --print-rpath "$OUTPUT_BIN_DIR/retroarch")"
-    if [[ "$rpath_actual" != '$ORIGIN/../lib/ffmpeg' ]]; then
-        echo "runpath did not take: got '$rpath_actual'" >&2
-        exit 1
-    fi
-    echo "runpath: $rpath_actual"
+    retroarch_runpath+=':$ORIGIN/../lib/ffmpeg'
+fi
+patchelf --set-rpath "$retroarch_runpath" "$OUTPUT_BIN_DIR/retroarch"
+rpath_actual="$(patchelf --print-rpath "$OUTPUT_BIN_DIR/retroarch")"
+if [[ "$rpath_actual" != "$retroarch_runpath" ]]; then
+    echo "runpath did not take: got '$rpath_actual'" >&2
+    exit 1
+fi
+echo "runpath: $rpath_actual"
+
+# Without the library the loader quietly falls back to the rootfs SDL, which
+# runs fine until HDMI is unplugged. Refuse to write a manifest for that.
+if ! "$CROSS_TRIPLE-readelf" -d "$OUTPUT_BIN_DIR/retroarch" |
+        sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | grep -qxF "$MLP1_SDL2_SONAME"; then
+    echo "RetroArch does not link $MLP1_SDL2_SONAME" >&2
+    exit 1
+fi
+mlp1_sdl2_verify "$SDL2_OUTPUT_DIR/$MLP1_SDL2_SONAME"
+if [[ "$(sha256sum "$SDL2_OUTPUT_DIR/$MLP1_SDL2_SONAME" | cut -d' ' -f1)" != "$MLP1_SDL2_OUTPUT_SHA256" ]]; then
+    echo "$SDL2_OUTPUT_DIR/$MLP1_SDL2_SONAME changed after it was built" >&2
+    exit 1
 fi
 
 verification_status="skipped"
@@ -463,6 +492,22 @@ mkdir -p "$(dirname "$BUILD_MANIFEST")"
     printf '  "toolchain_image": '; json_string "$TOOLCHAIN_IMAGE"; printf ",\n"
     printf '  "build_inputs_sha256": '; json_object "${build_inputs_sha256[@]}"; printf ",\n"
     printf '  "ffmpeg_input_stamp_sha256": '; json_string "$ffmpeg_input_stamp_sha256"; printf ",\n"
+    printf '  "runpath": '; json_string "$retroarch_runpath"; printf ",\n"
+    printf "  \"sdl2\": {\n"
+    printf '    "version": '; json_string "$MLP1_SDL2_VERSION"; printf ",\n"
+    printf '    "source_urls": '; json_array "${MLP1_SDL2_URLS[@]}"; printf ",\n"
+    printf '    "source_sha256": '; json_string "$MLP1_SDL2_SHA256"; printf ",\n"
+    printf '    "patches_sha256": '; json_object "${sdl2_patches_sha256[@]}"; printf ",\n"
+    printf '    "xkbcommon_headers": '
+    json_object version "$MLP1_XKBCOMMON_VERSION" sha256 "$MLP1_XKBCOMMON_SHA256"
+    printf ",\n"
+    printf '    "configure_flags": '; json_array "${MLP1_SDL2_CONFIGURE_FLAGS[@]}"; printf ",\n"
+    printf '    "cflags": '; json_string "$MLP1_SDL2_CFLAGS"; printf ",\n"
+    printf '    "ldflags": '; json_string "$MLP1_SDL2_LDFLAGS"; printf ",\n"
+    printf '    "dynamic_libraries": '; json_object "${MLP1_SDL2_DYNAMIC_CONFIG[@]}"; printf ",\n"
+    printf '    "output_library": '; json_string "$SDL2_OUTPUT_DIR/$MLP1_SDL2_SONAME"; printf ",\n"
+    printf '    "output_library_sha256": '; json_string "$MLP1_SDL2_OUTPUT_SHA256"; printf "\n"
+    printf "  },\n"
     printf '  "output_binary": '; json_string "$OUTPUT_BIN_DIR/retroarch"; printf ",\n"
     printf '  "output_binary_sha256": '; json_string "$output_binary_sha256"; printf ",\n"
     printf '  "exceptions": [],\n'

@@ -1,0 +1,42 @@
+Stop waiting for a frame callback once the Wayland connection has failed.
+
+Wayland_GLES_SwapWindow waits for the previous commit's frame callback on its
+own event queue, with a timeout so a compositor that stops sending them cannot
+stall the caller. The timeout is only checked on the path that reads the
+socket. When wl_display_prepare_read_queue() fails because events are already
+queued, the loop dispatches them and starts over. After the connection fails,
+wl_display_dispatch_queue_pending() returns -1 without dispatching anything,
+the queue never empties, and the loop spins forever at full CPU.
+
+That is what happens on the MLP1 when HDMI is unplugged during a RetroArch
+game. Weston loses its only output and jawakad restarts it, and if a frame
+callback was read into the queue just before the socket closed, RetroArch hangs
+in this loop. It ignores SIGTERM because its main loop never runs again, so it
+can only be killed, which loses SRAM just as the crash 0001 fixes does. Sampled
+on the device: the main thread cycles through wl_display_flush,
+wl_display_prepare_read_queue and wl_display_dispatch_queue_pending inside
+Wayland_GLES_SwapWindow. The same loop is unchanged in SDL2 and SDL3 upstream.
+
+Nothing in the loop can make progress once the display has an error, so leave
+it then. The next Wayland_PumpEvents() sees the same error and sends SDL_QUIT,
+and RetroArch exits normally and writes SRAM.
+
+diff --git a/src/video/wayland/SDL_waylandopengles.c b/src/video/wayland/SDL_waylandopengles.c
+index b18e024..7e4b980 100644
+--- a/src/video/wayland/SDL_waylandopengles.c
++++ b/src/video/wayland/SDL_waylandopengles.c
+@@ -130,6 +130,14 @@ int Wayland_GLES_SwapWindow(_THIS, SDL_Window *window)
+         while (SDL_AtomicGet(&data->swap_interval_ready) == 0) {
+             Uint32 now;
+ 
++            /* Once the connection has failed, queued events are never dispatched,
++             * so the pending-events path below would spin forever without
++             * reaching the timeout. Wayland_PumpEvents() turns the failure into
++             * SDL_QUIT. */
++            if (WAYLAND_wl_display_get_error(display) != 0) {
++                break;
++            }
++
+             WAYLAND_wl_display_flush(display);
+ 
+             /* wl_display_prepare_read_queue() will return -1 if the event queue is not empty.

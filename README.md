@@ -57,12 +57,32 @@ MLP1_PATCH_SET=portrait-rotation,command-menu,jawaka-load-content ./build-mlp1.s
 ```
 
 The build manifest records a SHA-256 for every applied patch
-(`patches_sha256`), for `build-mlp1.sh` and `fetch-retroarch.sh`
-(`build_inputs_sha256`) and for the finished binary (`output_binary_sha256`),
-plus the RetroArch tag and remote the script pins (`source_defaults`). Leaf
-checks them against this checkout before it reuses `output/mlp1/bin/retroarch`.
-If you edit a patch in place, change either script, or build with an overridden
-`RETROARCH_VERSION`, Leaf rebuilds instead of shipping the old binary.
+(`patches_sha256`), for `build-mlp1.sh`, `fetch-retroarch.sh`,
+`build-mlp1-sdl2.sh` and the SDL2 patch (`build_inputs_sha256`) and for the
+finished binary (`output_binary_sha256`), plus the RetroArch tag and remote the
+script pins (`source_defaults`). Leaf checks them against this checkout before
+it reuses `output/mlp1/bin/retroarch`. If you edit a patch in place, change one
+of those scripts, or build with an overridden `RETROARCH_VERSION`, Leaf
+rebuilds instead of shipping the old binary.
+
+Every MLP1 build also produces `output/mlp1/lib/retroarch/libSDL2-2.0.so.0`:
+SDL 2.28.5, the device's version, with two fixes in `patches/mlp1/sdl2/`.
+RetroArch draws through SDL's Wayland backend, and when HDMI is unplugged the
+stock 2.28.5 either dereferences a NULL display (fixed upstream in 2.30.2,
+libsdl-org/SDL a6b684d, backported as 0001) or, with that fixed, can spin
+forever waiting for a frame callback on the dead Weston connection (0002, not
+upstream). Either way RetroArch dies or hangs before it writes SRAM.
+`build-mlp1-sdl2.sh` fetches
+the SDL tarball and the libxkbcommon 1.4.0 headers it needs (the toolchain
+sysroot has none) by pinned SHA-256 into `workdir/downloads/`, and builds SDL
+with Wayland, EGL, KMSDRM and audio loaded at runtime, like the rootfs build.
+RetroArch gets a `$ORIGIN/../lib/retroarch` RUNPATH, so it loads this copy and
+the launcher and standalones keep the rootfs SDL. The library ships as one
+regular file named by its SONAME, since the SD card is FAT32. The manifest's
+`sdl2` object records the source, header and patch hashes, the configure flags,
+the runtime-loaded library names and the output hash, and the build fails
+rather than write a manifest when the library is missing or RetroArch does not
+link it.
 
 With the `command-menu` patch, the command smoke also runs
 `./smoke-mlp1-load-state-sync.sh`: the MLP1 binary runs inside the toolchain
@@ -184,6 +204,7 @@ Outputs:
 - app bundle: `output/macos/RetroArch.app`
 - MLP1 binary: `output/mlp1/bin/retroarch`
 - MLP1 build manifest: `output/mlp1/build-manifest.json`
+- MLP1 SDL2 for RetroArch: `output/mlp1/lib/retroarch/libSDL2-2.0.so.0`
 - MLP1 FFmpeg input stamp: `output/mlp1/ffmpeg/input-stamp.json`
 - MLP1 GLSL shader bundle: `output/mlp1/shaders/`
 - Jawaka pak: `build/package/RetroArch.pak` (staged under `Apps/shared/`)

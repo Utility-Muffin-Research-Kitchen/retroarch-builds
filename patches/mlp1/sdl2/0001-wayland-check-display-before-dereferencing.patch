@@ -1,0 +1,30 @@
+From a6b684d05a42120bc16789fa79cacd29745df646 Mon Sep 17 00:00:00 2001
+From: Frank Praznik <frank.praznik@gmail.com>
+Date: Wed, 20 Mar 2024 15:42:42 -0400
+Subject: [PATCH] wayland: Check the returned display pointer before
+ dereferencing
+
+Fixes a crash when all displays are disconnected.
+
+(cherry picked from commit 5df737bb3cd0f110705ee9850c4aa54ba78d08c8)
+
+Backported to SDL 2.28.5 for Leaf's MLP1 RetroArch: the same null check,
+on 2.28.x's 10000/1000 fallback instead of 2.30's 3000/50. Unplugging HDMI
+takes Weston's only output away, SDL_GetDisplayForWindow() returns NULL on
+the next vsynced swap, and the unpatched line kills RetroArch with SIGSEGV.
+---
+ src/video/wayland/SDL_waylandopengles.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/video/wayland/SDL_waylandopengles.c b/src/video/wayland/SDL_waylandopengles.c
+--- a/src/video/wayland/SDL_waylandopengles.c
++++ b/src/video/wayland/SDL_waylandopengles.c
+@@ -126,7 +126,7 @@ int Wayland_GLES_SwapWindow(_THIS, SDL_Window *window)
+         struct wl_display *display = videodata->display;
+         SDL_VideoDisplay *sdldisplay = SDL_GetDisplayForWindow(window);
+         /* ~10 frames (or 1 sec), so we'll progress even if throttled to zero. */
+-        const Uint32 max_wait = SDL_GetTicks() + (sdldisplay->current_mode.refresh_rate ? (10000 / sdldisplay->current_mode.refresh_rate) : 1000);
++        const Uint32 max_wait = SDL_GetTicks() + (sdldisplay && sdldisplay->current_mode.refresh_rate ? (10000 / sdldisplay->current_mode.refresh_rate) : 1000);
+         while (SDL_AtomicGet(&data->swap_interval_ready) == 0) {
+             Uint32 now;
+
