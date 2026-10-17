@@ -55,6 +55,7 @@ PATCH_PATHS = {
     "record-indicator": "mlp1/0006-recording-indicator.patch",
     "wayland-swap-interval": "mlp1/0007-wayland-swap-interval.patch",
     "sdl-gl-attributes": "mlp1/0008-sdl-gl-apply-attributes-after-video-init.patch",
+    "hotkey-poll-block": "mlp1/0009-hotkey-block-at-poll.patch",
 }
 
 entries = [name for name in patch_set.split(",") if name]
