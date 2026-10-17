@@ -89,7 +89,10 @@ With the `command-menu` patch, the command smoke also runs
 image against a small test core (`tests/load-state-sync/`) and answers
 `LOAD_STATE_SYNC` for a good, missing, truncated, compressed, oversized and
 core-rejected slot. The image is arm64, so this is native on an Apple Silicon
-host.
+host. A recording build needs FFmpeg 6.1, which the sysroot lacks, so the smoke
+adds `output/mlp1/ffmpeg/lib` (or `FFMPEG_LIB_DIR`) to the library path, and
+mounts the binary's parent directory so a card-style `lib/` beside `bin/`
+resolves through the RUNPATH.
 
 Jawaka app tile packaging:
 
