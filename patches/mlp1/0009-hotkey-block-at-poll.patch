@@ -1,0 +1,106 @@
+Block game input from the poll that first sees 'enable_hotkey'.
+
+runloop_check_state() clears INP_FLAG_BLOCK_LIBRETRO_INPUT and sets it again
+from input_keys_pressed(), which reads the joypad state of the previous poll.
+The core polls for the frame after that decision, whatever the poll type. So
+when the hotkey modifier and a hotkey's button first show up in the same poll,
+the core reads that button for one frame before the block engages. Leaf's input proxy holds Menu back until the chord button
+arrives and sends both in one write, so on MLP1 that is nearly every chord.
+
+Most cores ignore one stray frame. gambatte and gpSP don't: they make
+RetroPad R2 a hold-to-fast-forward through
+RETRO_ENVIRONMENT_SET_FASTFORWARDING_OVERRIDE. With the fast-forward toggle on
+Menu + R2, the leaked frame sets the override, its release forces fast-forward
+off, and the hotkey edge turns it straight back on, so turning fast-forward
+off took several presses.
+
+Re-test 'enable_hotkey' in input_driver_poll() right after the joypad poll,
+with the same port and binds input_keys_pressed() uses, and set the block
+before the core reads input. Only with input_hotkey_block_delay at 0, which is
+what Jawaka writes for the Menu modifier: a nonzero delay lets input through
+on purpose and keeps its behavior. The flag is still cleared and recomputed
+by runloop_check_state() every frame, so this only adds the missing frame.
+
+diff --git a/input/input_driver.c b/input/input_driver.c
+index 6ea61dea71..f862aac774 100644
+--- a/input/input_driver.c
++++ b/input/input_driver.c
+@@ -6067,6 +6067,57 @@ static void input_keys_pressed(
+       input_st->input_hotkey_block_counter = 0;
+ }
+ 
++/**
++ * input_driver_hotkey_enable_pressed:
++ *
++ * Whether 'enable_hotkey' is held in the joypad state that
++ * input_driver_poll() just read. Same port, binds and test as
++ * the block in input_keys_pressed().
++ */
++static bool input_driver_hotkey_enable_pressed(
++      input_driver_state_t *input_st,
++      settings_t *settings,
++      const input_device_driver_t *sec_joypad)
++{
++   rarch_joypad_info_t joypad_info;
++   const struct retro_keybind *binds_norm = NULL;
++   const struct retro_keybind *binds_auto = NULL;
++   unsigned hotkey_port                   = 0;
++
++   if (settings->bools.input_hotkey_follows_player1)
++   {
++      hotkey_port = settings->uints.input_remap_port_map[0][0];
++
++      if (hotkey_port >= MAX_USERS)
++         hotkey_port = 0;
++   }
++
++   /* input_driver_collect_system_input() never reaches a disabled port */
++   if (hotkey_port >= settings->uints.input_max_users)
++      return false;
++
++   joypad_info.axis_threshold = settings->floats.input_axis_threshold;
++   joypad_info.joy_idx        = settings->uints.input_joypad_index[hotkey_port];
++   joypad_info.auto_binds     = input_autoconf_binds[joypad_info.joy_idx];
++   binds_norm                 = &input_config_binds[hotkey_port][RARCH_ENABLE_HOTKEY];
++   binds_auto                 = &input_autoconf_binds[joypad_info.joy_idx][RARCH_ENABLE_HOTKEY];
++
++   if (     !(binds_norm->valid || binds_auto->valid)
++         || !CHECK_INPUT_DRIVER_BLOCK_HOTKEY(binds_norm, binds_auto))
++      return false;
++
++   return input_state_wrap(
++         input_st->current_driver,
++         input_st->current_data,
++         input_st->primary_joypad,
++         sec_joypad,
++         &joypad_info,
++         (const retro_keybind_set *)input_config_binds,
++         (input_st->flags & INP_FLAG_KB_MAPPING_BLOCKED) ? true : false,
++         hotkey_port, RETRO_DEVICE_JOYPAD, 0,
++         RARCH_ENABLE_HOTKEY) != 0;
++}
++
+ void input_driver_poll(void)
+ {
+    size_t i, j;
+@@ -6094,6 +6145,20 @@ void input_driver_poll(void)
+          && input_st->current_driver->poll)
+       input_st->current_driver->poll(input_st->current_data);
+ 
++   /* runloop_check_state() decides INP_FLAG_BLOCK_LIBRETRO_INPUT from
++    * the previous poll, and the core reads input after this one. When
++    * 'enable_hotkey' and a hotkey's button first show up in the same
++    * poll, the core used to see that button for one frame, which is
++    * enough for a core that acts on it (gambatte and gpSP hold-to-fast-
++    * forward on R2) to fight the hotkey. Leaf's input proxy holds Menu
++    * back until the chord button arrives and sends both at once, so on
++    * MLP1 that was nearly every chord. A nonzero block delay lets input
++    * through on purpose, so only block early without one. */
++   if (     !(input_st->flags & INP_FLAG_BLOCK_LIBRETRO_INPUT)
++         && settings->uints.input_hotkey_block_delay == 0
++         && input_driver_hotkey_enable_pressed(input_st, settings, sec_joypad))
++      input_st->flags |= INP_FLAG_BLOCK_LIBRETRO_INPUT;
++
+ #ifdef HAVE_OVERLAY
+    if (      input_st->overlay_ptr
+          && (input_st->overlay_ptr->flags & INPUT_OVERLAY_ALIVE))

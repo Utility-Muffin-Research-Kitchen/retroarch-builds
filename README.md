@@ -268,6 +268,7 @@ Supported `MLP1_PATCH_SET` entries:
 | `record-indicator` | draw a pulsing dot while a recording is running |
 | `wayland-swap-interval` | honor swap intervals above 1 on SDL/Wayland by preserving the back buffer and swapping once per refresh; gives ~60 fps content even pacing at 120 Hz. Check: `make wayland-swap-interval-patch-test` |
 | `sdl-gl-attributes` | store the GL context version and profile in `bind_api` and apply them again after SDL's video subsystem starts, since SDL resets them there; without it a Debian-style SDL that defaults to desktop GL gets the wrong context. Apply it after `wayland-swap-interval`. Check: `make sdl-gl-attributes-patch-test` |
+| `hotkey-poll-block` | with `input_hotkey_block_delay` at 0, block game input from the poll that first sees the hotkey modifier, so a chord whose modifier and button land in one poll no longer hands the button to the core for a frame (Menu + R2 fast-forward could not turn off on gambatte and gpSP). Check: `make hotkey-poll-block-patch-test` |
 
 ## Notes
 

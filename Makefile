@@ -14,7 +14,7 @@ JAWAKA_SDCARD_ROOT ?= $(WORKSPACE_ROOT)/Jawaka/mock-sdcard
 SDCARD_PATH ?= $(JAWAKA_SDCARD_ROOT)
 APPS_PATH ?= $(SDCARD_PATH)/Apps
 
-.PHONY: package package-native package-platform package-mlp1 install-jawaka-app adb-stage-pak-mlp1 shaders-mlp1 validate-shaders-mlp1 test-shaders-mlp1 smoke-shaders-mlp1 performance-shader-mlp1 qualify-shader-recommendations-mlp1 qualify-shader-expansion-mlp1 assets-mlp1 validate-assets-mlp1 test-assets-mlp1 advanced-shader-menu-patch-test wayland-swap-interval-patch-test sdl-gl-attributes-patch-test power-hold-sync-save-patch-test load-state-sync-smoke-mlp1 clean
+.PHONY: package package-native package-platform package-mlp1 install-jawaka-app adb-stage-pak-mlp1 shaders-mlp1 validate-shaders-mlp1 test-shaders-mlp1 smoke-shaders-mlp1 performance-shader-mlp1 qualify-shader-recommendations-mlp1 qualify-shader-expansion-mlp1 assets-mlp1 validate-assets-mlp1 test-assets-mlp1 advanced-shader-menu-patch-test wayland-swap-interval-patch-test sdl-gl-attributes-patch-test hotkey-poll-block-patch-test power-hold-sync-save-patch-test load-state-sync-smoke-mlp1 clean
 
 shaders-mlp1:
 	$(PYTHON) "$(MLP1_SHADER_TOOL)" build --output "$(MLP1_SHADER_OUTPUT)"
@@ -42,6 +42,9 @@ wayland-swap-interval-patch-test:
 
 sdl-gl-attributes-patch-test:
 	bash scripts/check-sdl-gl-attributes-patch.sh
+
+hotkey-poll-block-patch-test:
+	bash scripts/check-hotkey-poll-block-patch.sh
 
 power-hold-sync-save-patch-test:
 	bash scripts/check-power-hold-sync-save-patch.sh
