@@ -1,0 +1,45 @@
+Don't crash GET_STATUS on a core whose .info has no systemid.
+
+command_get_status() copies core_info->system_id into the reply with
+strlcpy(), and system_id is NULL when the core's .info file has no
+'systemid' line. strlcpy() faults on it and RetroArch dies with SIGSEGV
+on the network command. On MLP1 that is any in-game Menu tap: jawakad
+sends GET_STATUS before it shows the in-game menu, so the tap kills the
+game instead. Verified with Game & Watch (gw_libretro.info) and EasyRPG
+(easyrpg_libretro.info), both pc 0x1f0908 / lr 0x4a7c8 in Leaf's v1.22.2
+MLP1 build.
+
+Fall back to the core's library_name, and to an empty field when that
+is missing too. The reply keeps its shape ("GET_STATUS PLAYING
+<system>,<content>,crc32=..."), so jawakad's parser is unaffected. Upstream
+fixed the same dereference after v1.22.2 in 68e8274a31
+(libretro/RetroArch#18585), with "UNKNOWN" as the last resort; drop
+this patch once Leaf builds a RetroArch that has it.
+
+diff --git a/command.c b/command.c
+index 21e6878c8c..f1b8c9ccbb 100644
+--- a/command.c
++++ b/command.c
+@@ -1660,12 +1660,16 @@ bool command_get_status(command_t *cmd, const char* arg)
+       else
+          _len += strlcpy(reply + _len, "PLAYING", sizeof(reply) - _len);
+       _len    += strlcpy(reply + _len, " ", sizeof(reply) - _len);
+-      if (core_info)
+-         _len += strlcpy(reply + _len, core_info->system_id,
+-               sizeof(reply) - _len);
+-      else
+-         _len += strlcpy(reply + _len, runloop_st->system.info.library_name,
+-               sizeof(reply) - _len);
++      {
++         /* system_id is NULL for a core whose .info has no systemid */
++         const char *system_id = NULL;
++         if (core_info && !string_is_empty(core_info->system_id))
++            system_id = core_info->system_id;
++         else if (!string_is_empty(runloop_st->system.info.library_name))
++            system_id = runloop_st->system.info.library_name;
++         if (system_id)
++            _len += strlcpy(reply + _len, system_id, sizeof(reply) - _len);
++      }
+       _len    += strlcpy(reply + _len, ",", sizeof(reply) - _len);
+       _len    += strlcpy(reply + _len,
+             path_basename(path_get(RARCH_PATH_BASENAME)), sizeof(reply) - _len);

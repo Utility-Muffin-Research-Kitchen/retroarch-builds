@@ -1,0 +1,7 @@
+# Core info for the GET_STATUS smoke. It reuses the LOAD_STATE_SYNC test core
+# but leaves out systemid on purpose, like gw_libretro.info and
+# easyrpg_libretro.info, so GET_STATUS has to fall back to the library name.
+display_name = "Get Status Test"
+corename = "LoadStateSyncTest"
+systemname = "Test"
+supported_extensions = "bin"

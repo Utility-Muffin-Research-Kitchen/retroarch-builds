@@ -91,6 +91,15 @@ image against a small test core (`tests/load-state-sync/`) and answers
 core-rejected slot. The image is arm64, so this is native on an Apple Silicon
 host.
 
+With the `get-status-system-id` patch, the command smoke also runs
+`./smoke-mlp1-get-status.sh`: the same test core with an info file that has no
+`systemid` (`tests/get-status/`) must answer `GET_STATUS` with its library name
+and keep running. An unpatched binary dies there with SIGSEGV. A recording
+build needs FFmpeg 6.1, which the sysroot lacks, so the smoke adds
+`output/mlp1/ffmpeg/lib` (or `FFMPEG_LIB_DIR`) to the library path, and mounts
+the binary's parent directory so a card-style `lib/` beside `bin/` resolves
+through the RUNPATH.
+
 Jawaka app tile packaging:
 
 ```sh
@@ -269,6 +278,7 @@ Supported `MLP1_PATCH_SET` entries:
 | `wayland-swap-interval` | honor swap intervals above 1 on SDL/Wayland by preserving the back buffer and swapping once per refresh; gives ~60 fps content even pacing at 120 Hz. Check: `make wayland-swap-interval-patch-test` |
 | `sdl-gl-attributes` | store the GL context version and profile in `bind_api` and apply them again after SDL's video subsystem starts, since SDL resets them there; without it a Debian-style SDL that defaults to desktop GL gets the wrong context. Apply it after `wayland-swap-interval`. Check: `make sdl-gl-attributes-patch-test` |
 | `hotkey-poll-block` | with `input_hotkey_block_delay` at 0, block game input from the poll that first sees the hotkey modifier, so a chord whose modifier and button land in one poll no longer hands the button to the core for a frame (Menu + R2 fast-forward could not turn off on gambatte and gpSP). Check: `make hotkey-poll-block-patch-test` |
+| `get-status-system-id` | answer `GET_STATUS` for a core whose `.info` has no `systemid` (Game & Watch, EasyRPG) with its library name instead of crashing on the NULL system id; jawakad sends `GET_STATUS` on every in-game Menu tap, so the tap used to kill those games. Upstream fixed it after v1.22.2 (libretro/RetroArch#18585). Check: `make get-status-smoke-mlp1` |
 
 ## Notes
 
