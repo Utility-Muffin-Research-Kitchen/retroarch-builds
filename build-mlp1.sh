@@ -245,12 +245,16 @@ apply_named_patch() {
             patch_path="$REPO_ROOT/patches/mlp1/0009-hotkey-block-at-poll.patch"
             patch_label="mlp1/$(basename "$patch_path")"
             ;;
+        get-status-system-id)
+            patch_path="$REPO_ROOT/patches/mlp1/0010-get-status-null-system-id.patch"
+            patch_label="mlp1/$(basename "$patch_path")"
+            ;;
         "")
             return 0
             ;;
         *)
             echo "unknown MLP1 patch set entry: $name" >&2
-            echo "known entries: portrait-rotation, command-menu, jawaka-load-content, controller-bindings, record-scale-clamp, record-indicator, wayland-swap-interval, sdl-gl-attributes, hotkey-poll-block" >&2
+            echo "known entries: portrait-rotation, command-menu, jawaka-load-content, controller-bindings, record-scale-clamp, record-indicator, wayland-swap-interval, sdl-gl-attributes, hotkey-poll-block, get-status-system-id" >&2
             exit 1
             ;;
     esac

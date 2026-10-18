@@ -56,6 +56,7 @@ PATCH_PATHS = {
     "wayland-swap-interval": "mlp1/0007-wayland-swap-interval.patch",
     "sdl-gl-attributes": "mlp1/0008-sdl-gl-apply-attributes-after-video-init.patch",
     "hotkey-poll-block": "mlp1/0009-hotkey-block-at-poll.patch",
+    "get-status-system-id": "mlp1/0010-get-status-null-system-id.patch",
 }
 
 entries = [name for name in patch_set.split(",") if name]
@@ -161,12 +162,21 @@ if "command-menu" in entries:
 else:
     print("manifest_ok: clean upstream command build has no MLP1 patches")
     print("device_required: launch this binary on MLP1 and send GET_STATUS, PAUSE_TOGGLE, MENU_TOGGLE, QUIT over the RetroArch command interface")
+
+if "get-status-system-id" in entries:
+    print("run_get_status_smoke")
 PY
 )"
-grep -v '^run_load_state_sync_smoke$' <<< "$manifest_report"
+grep -v -e '^run_load_state_sync_smoke$' -e '^run_get_status_smoke$' <<< "$manifest_report"
 
 # A command-menu build also has to apply a state through LOAD_STATE_SYNC, not
 # just carry its strings: run the binary against a test core.
 if grep -qx 'run_load_state_sync_smoke' <<< "$manifest_report"; then
     BINARY="$BINARY" "$SCRIPT_DIR/smoke-mlp1-load-state-sync.sh"
+fi
+
+# GET_STATUS must answer for a core whose .info has no systemid; jawakad sends
+# it on every in-game Menu tap.
+if grep -qx 'run_get_status_smoke' <<< "$manifest_report"; then
+    BINARY="$BINARY" "$SCRIPT_DIR/smoke-mlp1-get-status.sh"
 fi

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Runtime smoke for GET_STATUS on a core whose .info has no systemid.
+#
+# Upstream v1.22.2 copies core_info->system_id into the reply without a NULL
+# check, so such a core (Game & Watch, EasyRPG) makes RetroArch SIGSEGV on
+# GET_STATUS, and jawakad sends GET_STATUS on every in-game Menu tap. Like
+# smoke-mlp1-load-state-sync.sh, this runs the MLP1 binary natively in the
+# arm64 toolchain image with null drivers, against the LOAD_STATE_SYNC test
+# core and an info file without systemid (tests/get-status/).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/output/mlp1}"
+BINARY="${BINARY:-$OUTPUT_DIR/bin/retroarch}"
+TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:latest}"
+RETROARCH_SRC_DIR="${RETROARCH_SRC_DIR:-$SCRIPT_DIR/workdir/src/RetroArch}"
+# A recording build links FFmpeg 6.1, which the sysroot does not have. On the
+# card it sits in lib/ffmpeg beside bin/ (the binary's RUNPATH); a fresh build
+# leaves it in output/mlp1/ffmpeg/lib.
+FFMPEG_LIB_DIR="${FFMPEG_LIB_DIR:-$OUTPUT_DIR/ffmpeg/lib}"
+
+if [[ "${IN_MLP1_CONTAINER:-0}" != "1" ]]; then
+    if [[ ! -x "$BINARY" ]]; then
+        echo "missing executable MLP1 RetroArch binary: $BINARY" >&2
+        exit 1
+    fi
+    if [[ ! -f "$RETROARCH_SRC_DIR/libretro-common/include/libretro.h" ]]; then
+        echo "missing libretro.h; run ./fetch-retroarch.sh first" >&2
+        exit 1
+    fi
+    if ! docker image inspect "$TOOLCHAIN_IMAGE" >/dev/null 2>&1; then
+        echo "missing Docker image: $TOOLCHAIN_IMAGE" >&2
+        exit 1
+    fi
+    ffmpeg_mount=()
+    if [[ -d "$FFMPEG_LIB_DIR" ]]; then
+        ffmpeg_mount=(-v "$(cd "$FFMPEG_LIB_DIR" && pwd)":/ra-ffmpeg:ro)
+    fi
+    # The binary's parent directory, so its RUNPATH ($ORIGIN/../lib/...)
+    # resolves the way it does on the card.
+    ra_root="$(cd "$(dirname "$BINARY")/.." && pwd)"
+    ra_rel="$(basename "$(dirname "$BINARY")")/$(basename "$BINARY")"
+    exec docker run --rm --init \
+        -e IN_MLP1_CONTAINER=1 \
+        -e RA_BINARY="/ra-root/$ra_rel" \
+        -v "$SCRIPT_DIR":/workspace:ro \
+        -v "$ra_root":/ra-root:ro \
+        ${ffmpeg_mount[@]+"${ffmpeg_mount[@]}"} \
+        -v "$RETROARCH_SRC_DIR/libretro-common/include":/ra-include:ro \
+        -w /workspace \
+        "$TOOLCHAIN_IMAGE" \
+        /workspace/smoke-mlp1-get-status.sh
+fi
+
+WORK="$(mktemp -d)"
+RA_PID=""
+cleanup() {
+    if [[ -n "$RA_PID" ]] && kill -0 "$RA_PID" 2>/dev/null; then
+        kill "$RA_PID" 2>/dev/null || true
+        wait "$RA_PID" 2>/dev/null || true
+    fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+mkdir -p "$WORK/home" "$WORK/info"
+"${CROSS_TRIPLE:-aarch64-buildroot-linux-gnu}-gcc" -O2 -Wall -Wextra -Werror \
+    -shared -fPIC -I/ra-include \
+    -o "$WORK/testcore_libretro.so" /workspace/tests/load-state-sync/testcore.c
+printf 'not a real game\n' > "$WORK/game.bin"
+cp /workspace/tests/get-status/testcore_libretro.info "$WORK/info/"
+
+cat > "$WORK/retroarch.cfg" <<CFG
+video_driver = "null"
+audio_driver = "null"
+input_driver = "null"
+input_joypad_driver = "null"
+menu_driver = "rgui"
+midi_driver = "null"
+microphone_driver = "null"
+camera_driver = "null"
+location_driver = "null"
+record_driver = "null"
+bluetooth_driver = "null"
+wifi_driver = "null"
+config_save_on_exit = "false"
+quit_press_twice = "false"
+network_cmd_enable = "true"
+network_cmd_port = "55355"
+libretro_directory = "$WORK"
+libretro_info_path = "$WORK/info"
+savefile_directory = "$WORK"
+savestate_directory = "$WORK"
+system_directory = "$WORK"
+savestate_auto_load = "false"
+cheevos_enable = "false"
+pause_nonactive = "false"
+video_threaded = "false"
+CFG
+
+SYSROOT="${SYSROOT:?toolchain image did not set SYSROOT}"
+HOME="$WORK/home" "$SYSROOT/lib/ld-linux-aarch64.so.1" \
+    --library-path "$SYSROOT/lib:$SYSROOT/usr/lib:$SYSROOT/usr/lib/pulseaudio:/ra-ffmpeg" \
+    "$RA_BINARY" --verbose --config "$WORK/retroarch.cfg" \
+    -L "$WORK/testcore_libretro.so" "$WORK/game.bin" \
+    > "$WORK/retroarch.log" 2>&1 &
+RA_PID=$!
+
+if ! python3 /workspace/tests/get-status/drive.py "$RA_PID"; then
+    # 139 is RetroArch's own SIGSEGV; 143 is this script stopping it.
+    kill "$RA_PID" 2>/dev/null || true
+    status=0
+    wait "$RA_PID" || status=$?
+    RA_PID=""
+    echo "RetroArch exit status: $status" >&2
+    echo "--- retroarch.log (tail) ---" >&2
+    tail -20 "$WORK/retroarch.log" >&2
+    exit 1
+fi
+
+for _ in $(seq 1 50); do
+    kill -0 "$RA_PID" 2>/dev/null || break
+    sleep 0.1
+done
+if kill -0 "$RA_PID" 2>/dev/null; then
+    echo "RetroArch did not exit after QUIT" >&2
+    exit 1
+fi
+wait "$RA_PID" || { echo "RetroArch exited non-zero after QUIT" >&2; exit 1; }
+RA_PID=""
+echo "PASS smoke-mlp1-get-status"
