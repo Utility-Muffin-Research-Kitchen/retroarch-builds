@@ -14,6 +14,10 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/output/mlp1}"
 BINARY="${BINARY:-$OUTPUT_DIR/bin/retroarch}"
 TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:latest}"
 RETROARCH_SRC_DIR="${RETROARCH_SRC_DIR:-$SCRIPT_DIR/workdir/src/RetroArch}"
+# A recording build (every MLP1_REQUIRE_FFMPEG=1 build) links FFmpeg 6.1, which
+# the sysroot does not have. On the card it sits in lib/ffmpeg beside bin/ (the
+# binary's RUNPATH); a fresh build leaves it in output/mlp1/ffmpeg/lib.
+FFMPEG_LIB_DIR="${FFMPEG_LIB_DIR:-$OUTPUT_DIR/ffmpeg/lib}"
 
 if [[ "${IN_MLP1_CONTAINER:-0}" != "1" ]]; then
     if [[ ! -x "$BINARY" ]]; then
@@ -28,10 +32,20 @@ if [[ "${IN_MLP1_CONTAINER:-0}" != "1" ]]; then
         echo "missing Docker image: $TOOLCHAIN_IMAGE" >&2
         exit 1
     fi
+    ffmpeg_mount=()
+    if [[ -d "$FFMPEG_LIB_DIR" ]]; then
+        ffmpeg_mount=(-v "$(cd "$FFMPEG_LIB_DIR" && pwd)":/ra-ffmpeg:ro)
+    fi
+    # The binary's parent directory, so its RUNPATH ($ORIGIN/../lib/...)
+    # resolves the way it does on the card.
+    ra_root="$(cd "$(dirname "$BINARY")/.." && pwd)"
+    ra_rel="$(basename "$(dirname "$BINARY")")/$(basename "$BINARY")"
     exec docker run --rm --init \
         -e IN_MLP1_CONTAINER=1 \
+        -e RA_BINARY="/ra-root/$ra_rel" \
         -v "$SCRIPT_DIR":/workspace:ro \
-        -v "$(cd "$(dirname "$BINARY")" && pwd)":/ra-bin:ro \
+        -v "$ra_root":/ra-root:ro \
+        ${ffmpeg_mount[@]+"${ffmpeg_mount[@]}"} \
         -v "$RETROARCH_SRC_DIR/libretro-common/include":/ra-include:ro \
         -w /workspace \
         "$TOOLCHAIN_IMAGE" \
@@ -91,8 +105,8 @@ EOF
 
 SYSROOT="${SYSROOT:?toolchain image did not set SYSROOT}"
 HOME="$WORK/home" "$SYSROOT/lib/ld-linux-aarch64.so.1" \
-    --library-path "$SYSROOT/lib:$SYSROOT/usr/lib:$SYSROOT/usr/lib/pulseaudio" \
-    /ra-bin/retroarch --verbose --config "$WORK/retroarch.cfg" \
+    --library-path "$SYSROOT/lib:$SYSROOT/usr/lib:$SYSROOT/usr/lib/pulseaudio:/ra-ffmpeg" \
+    "$RA_BINARY" --verbose --config "$WORK/retroarch.cfg" \
     -L "$WORK/testcore_libretro.so" "$WORK/game.bin" \
     > "$WORK/retroarch.log" 2>&1 &
 RA_PID=$!
