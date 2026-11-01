@@ -160,6 +160,7 @@
         "PCE",
         "PCECD",
         "PICO8",
+        "POKEMINI",
         "PS",
         "SATURN",
         "SEGACD",
@@ -527,6 +528,7 @@
         "LYNX",
         "NGP",
         "NGPC",
+        "POKEMINI",
         "WS",
         "WSC"
       ],
